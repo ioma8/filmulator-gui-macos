@@ -44,24 +44,18 @@ Then run `make` and run `make install` as root.
 
 ## Building on MacOS:
 
-You'll need to know the locations of a couple things in order to build this. They're not hard to find, just use Finder's search functionality to find them. Wherever they are, we need the real dynamic libraries (.dylib), not the symbolic links that point to them. That's important! If you find a symbolic link, follow it to get the real dynamic library.  We need:
+The easiest way to build on macOS (Intel or Apple Silicon) is to use the provided build script. It will automatically install dependencies via Homebrew, build required libraries, and create a bundled application.
 
-libomp.dylib: it should be somewhere like /opt/local/lib/libomp.dylib. If you installed from homebrew, that's probably where it is. Replace wherever it is into `-DOpenMP_libomp_LIBRARY=` and `-fopenmp` below.
+1. Ensure you have [Homebrew](https://brew.sh/) installed.
+2. Run the build script from the project root:
+   ```bash
+   ./build_macos.sh
+   ```
+3. The resulting application and a zip archive will be in `filmulator-gui/build/`.
 
-libarchive.dylib: If you installed from homebrew, it probably needs to be /usr/local/Cellar/libarchive/3.4.3/include like below. Put this path into `-DLibArchive_INCLUDE_DIR`.
+### Continuous Integration (GitHub Actions)
 
-librtprocess: This needs to point towards the .dylib file for librtprocess. If you installed librtprocess from source, it's probably in /opt/local/lib/librtprocess.0.0.1.dylib like below. Wherever it is, put it into `-Dlibrtprocess_dylib`.
-
-QT: If you installed this from homebrew, it's probably at /usr/local/Cellar/qt/5.13.1/. Wherever it is, put it in the `export QT=` command below.
-
-
-Once you have all those figured out, the following commands, edited according to your locations detailed above, should build the Filmulator application on macOS. 
-
-1. `cd ~/filmulator-gui/filmulator-gui`
-2. `mkdir build && cd build`
-3. `export QT=/usr/local/Cellar/qt/5.13.1`
-4. `cmake -DCMAKE_BUILD_TYPE="RELEASE" -DCMAKE_CXX_COMPILER="clang++" -DCMAKE_CXX_FLAGS=-I/opt/local/include -DOpenMP_CXX_FLAGS="-Xpreprocessor -fopenmp /opt/local/lib/libomp/libomp.dylib -I/opt/local/include" -DOpenMP_CXX_LIB_NAMES="libomp" -DOpenMP_libomp_LIBRARY=/opt/local/lib/libomp/libomp.dylib -DCMAKE_INSTALL_PREFIX=/opt/local -DCMAKE_SHARED_LINKER_FLAGS=-L/opt/local/lib -DCMAKE_PREFIX_PATH=$(echo $QT/lib/cmake/* | sed -Ee 's$ $;$g') -G "Unix Makefiles" -DCMAKE_VERBOSE_MAKEFILE=1 -DLibArchive_INCLUDE_DIR=/usr/local/Cellar/libarchive/3.4.3/include -Dlibrtprocess_dylib=/opt/local/lib/librtprocess.0.0.1.dylib ..`
-5. `make -j8 install`
+A GitHub Actions workflow is available to build the macOS version automatically. It can be triggered manually from the "Actions" tab in the repository. It will create a release draft with the built binaries attached.
 
 # Using Filmulator
 

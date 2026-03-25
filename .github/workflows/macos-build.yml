@@ -1,0 +1,35 @@
+name: macOS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for the release (e.g., v0.11.1)'
+        required: true
+        default: 'v0.11.1'
+
+jobs:
+  build-macos:
+    name: Build macOS (arm64)
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build with local script
+        run: |
+          chmod +x build_macos.sh
+          ./build_macos.sh
+
+      - name: Create Release Draft
+        uses: softprops/action-gh-release@v2
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ github.event.inputs.tag_name }}
+          files: filmulator-gui/build/Filmulator-macOS-arm64.zip
+          draft: true
+          generate_release_notes: true
+          name: "Filmulator ${{ github.event.inputs.tag_name }} - macOS Build"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
