@@ -105,9 +105,7 @@ make -j$(sysctl -n hw.ncpu) install
 
 # Run macdeployqt to bundle Qt dependencies
 echo "Running macdeployqt..."
-# We point it to the app bundle. 
-# We also use -executable to make sure it fixes the main binary which is inside MacOS/
-# Note: macdeployqt often fails to fix non-Qt dylibs.
+# We point it to the actual binary to avoid it trying to process the shell script
 $QT_PATH/bin/macdeployqt Filmulator.app -qmldir=../qml -verbose=2 -executable=Filmulator.app/Contents/MacOS/filmulator
 
 # Manual fixup for non-Qt libraries
@@ -117,7 +115,6 @@ FRAMEWORKS_DIR="$APP_DIR/Contents/Frameworks"
 EXE_PATH="$APP_DIR/Contents/MacOS/filmulator"
 
 # List of libraries we want to ensure are referenced relatively
-# We use broader patterns here
 LIBS_TO_FIX=(
     "libraw"
     "libexiv2"
@@ -132,42 +129,45 @@ LIBS_TO_FIX=(
     "libssl"
 )
 
+# Ensure everything in Frameworks is writable
+chmod -R +w "$FRAMEWORKS_DIR"
+
 # 1. Update the executable to use @executable_path/../Frameworks/ for our libs
+echo "Fixing references in binary..."
 for lib_pattern in "${LIBS_TO_FIX[@]}"; do
-    # Find all references matching the pattern
-    # We use grep -i to be case-insensitive just in case
-    # and we capture the full path (first column)
     otool -L "$EXE_PATH" | grep -i "$lib_pattern" | awk '{print $1}' | while read -r CURRENT_REF; do
-        if [ -z "$CURRENT_REF" ]; then continue; fi
+        if [ -z "$CURRENT_REF" ] || [[ "$CURRENT_REF" == "@executable_path"* ]]; then continue; fi
         
-        # If it's an absolute path, change it
-        if [[ "$CURRENT_REF" == /opt/homebrew* ]] || [[ "$CURRENT_REF" == /usr/local* ]]; then
+        if [[ "$CURRENT_REF" == /opt/homebrew* ]] || [[ "$CURRENT_REF" == /usr/local* ]] || [[ "$CURRENT_REF" == "$DEPS_INSTALL_DIR"* ]]; then
             LIB_NAME=$(basename "$CURRENT_REF")
-            echo "Fixing $lib_pattern reference in $EXE_PATH: $CURRENT_REF -> @executable_path/../Frameworks/$LIB_NAME"
-            install_name_tool -change "$CURRENT_REF" "@executable_path/../Frameworks/$LIB_NAME" "$EXE_PATH"
+            echo "  Fixing $lib_pattern: $CURRENT_REF -> @executable_path/../Frameworks/$LIB_NAME"
+            install_name_tool -change "$CURRENT_REF" "@executable_path/../Frameworks/$LIB_NAME" "$EXE_PATH" || true
         fi
     done
 done
 
-# 2. Update the dylibs themselves to have relative IDs and references
+# 2. Update the dylibs themselves
+echo "Fixing dylibs..."
 for dylib in "$FRAMEWORKS_DIR"/*.dylib; do
     [ -e "$dylib" ] || continue
-    LIB_NAME=$(basename "$dylib")
+    # Skip if not a Mach-O file
+    if ! file "$dylib" | grep -q "Mach-O"; then continue; fi
     
-    # Fix ID (self-reference)
-    # This makes the dylib "aware" of its own relative location
-    install_name_tool -id "@executable_path/../Frameworks/$LIB_NAME" "$dylib"
+    LIB_NAME=$(basename "$dylib")
+    echo "  Processing $LIB_NAME..."
+    
+    # Fix ID
+    install_name_tool -id "@executable_path/../Frameworks/$LIB_NAME" "$dylib" || true
     
     # Fix its own dependencies
     for lib_pattern in "${LIBS_TO_FIX[@]}"; do
         otool -L "$dylib" | grep -i "$lib_pattern" | awk '{print $1}' | while read -r CURRENT_REF; do
-            if [ -z "$CURRENT_REF" ]; then continue; fi
+            if [ -z "$CURRENT_REF" ] || [[ "$CURRENT_REF" == "@executable_path"* ]]; then continue; fi
             
-            # If it's an absolute path, change it
-            if [[ "$CURRENT_REF" == /opt/homebrew* ]] || [[ "$CURRENT_REF" == /usr/local* ]]; then
+            if [[ "$CURRENT_REF" == /opt/homebrew* ]] || [[ "$CURRENT_REF" == /usr/local* ]] || [[ "$CURRENT_REF" == "$DEPS_INSTALL_DIR"* ]]; then
                 DEP_NAME=$(basename "$CURRENT_REF")
-                echo "  In $LIB_NAME, fixing $lib_pattern: $CURRENT_REF -> @executable_path/../Frameworks/$DEP_NAME"
-                install_name_tool -change "$CURRENT_REF" "@executable_path/../Frameworks/$DEP_NAME" "$dylib"
+                echo "    Fixing dependency $lib_pattern: $CURRENT_REF -> @executable_path/../Frameworks/$DEP_NAME"
+                install_name_tool -change "$CURRENT_REF" "@executable_path/../Frameworks/$DEP_NAME" "$dylib" || true
             fi
         done
     done
