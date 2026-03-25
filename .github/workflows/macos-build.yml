@@ -21,8 +21,6 @@ jobs:
         run: |
           chmod +x build_macos.sh
           ./build_macos.sh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Release Draft
         uses: softprops/action-gh-release@v2
