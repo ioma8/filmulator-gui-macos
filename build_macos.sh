@@ -173,6 +173,14 @@ for dylib in "$FRAMEWORKS_DIR"/*.dylib; do
     done
 done
 
+# 3. Ad-hoc sign everything (Required for Apple Silicon after modifying binaries)
+echo "Ad-hoc signing the bundle..."
+# Sign dylibs first, then plugins, then the main app
+find "$APP_DIR" -type f -name "*.dylib" -exec codesign --force --verify --verbose --sign - {} \;
+find "$APP_DIR/Contents/PlugIns" -type f -name "*.dylib" -exec codesign --force --verify --verbose --sign - {} \;
+codesign --force --verify --verbose --sign - "$EXE_PATH"
+codesign --force --verify --verbose --sign - "$APP_DIR"
+
 # Create zip archive
 echo "Creating zip archive..."
 zip -r Filmulator-macOS-arm64.zip Filmulator.app
