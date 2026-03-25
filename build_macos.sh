@@ -103,16 +103,21 @@ cmake ../ \
 echo "Compiling..."
 make -j$(sysctl -n hw.ncpu) install
 
-# Run macdeployqt to bundle Qt dependencies
-echo "Running macdeployqt..."
-# We point it to the actual binary to avoid it trying to process the shell script
-$QT_PATH/bin/macdeployqt Filmulator.app -qmldir=../qml -verbose=2 -executable=Filmulator.app/Contents/MacOS/filmulator
-
-# Manual fixup for non-Qt libraries
-echo "Manually fixing non-Qt library references..."
 APP_DIR="Filmulator.app"
 FRAMEWORKS_DIR="$APP_DIR/Contents/Frameworks"
 EXE_PATH="$APP_DIR/Contents/MacOS/filmulator"
+
+# Remove the wrapper script if it exists to avoid macdeployqt errors
+if [ -f "$APP_DIR/Contents/MacOS/filmulator-gui" ]; then
+    rm "$APP_DIR/Contents/MacOS/filmulator-gui"
+fi
+
+# Run macdeployqt to bundle Qt dependencies
+echo "Running macdeployqt..."
+$QT_PATH/bin/macdeployqt Filmulator.app -qmldir=../qml -verbose=2 -executable="$EXE_PATH"
+
+# Manual fixup for non-Qt libraries
+echo "Manually fixing non-Qt library references..."
 
 # List of libraries we want to ensure are referenced relatively
 LIBS_TO_FIX=(
@@ -132,16 +137,20 @@ LIBS_TO_FIX=(
 # Ensure everything in Frameworks is writable
 chmod -R +w "$FRAMEWORKS_DIR"
 
-# 1. Update the executable to use @executable_path/../Frameworks/ for our libs
+# Add @executable_path/../Frameworks to RPATH if not already there
+echo "Fixing RPATH in binary..."
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXE_PATH" || true
+
+# 1. Update the executable to use @rpath/ for our libs
 echo "Fixing references in binary..."
 for lib_pattern in "${LIBS_TO_FIX[@]}"; do
     otool -L "$EXE_PATH" | grep -i "$lib_pattern" | awk '{print $1}' | while read -r CURRENT_REF; do
-        if [ -z "$CURRENT_REF" ] || [[ "$CURRENT_REF" == "@executable_path"* ]]; then continue; fi
+        if [ -z "$CURRENT_REF" ] || [[ "$CURRENT_REF" == "@executable_path"* ]] || [[ "$CURRENT_REF" == "@rpath"* ]]; then continue; fi
         
         if [[ "$CURRENT_REF" == /opt/homebrew* ]] || [[ "$CURRENT_REF" == /usr/local* ]] || [[ "$CURRENT_REF" == "$DEPS_INSTALL_DIR"* ]]; then
             LIB_NAME=$(basename "$CURRENT_REF")
-            echo "  Fixing $lib_pattern: $CURRENT_REF -> @executable_path/../Frameworks/$LIB_NAME"
-            install_name_tool -change "$CURRENT_REF" "@executable_path/../Frameworks/$LIB_NAME" "$EXE_PATH" || true
+            echo "  Fixing $lib_pattern: $CURRENT_REF -> @rpath/$LIB_NAME"
+            install_name_tool -change "$CURRENT_REF" "@rpath/$LIB_NAME" "$EXE_PATH" || true
         fi
     done
 done
@@ -156,18 +165,18 @@ for dylib in "$FRAMEWORKS_DIR"/*.dylib; do
     LIB_NAME=$(basename "$dylib")
     echo "  Processing $LIB_NAME..."
     
-    # Fix ID
-    install_name_tool -id "@executable_path/../Frameworks/$LIB_NAME" "$dylib" || true
+    # Fix ID to use @rpath
+    install_name_tool -id "@rpath/$LIB_NAME" "$dylib" || true
     
     # Fix its own dependencies
     for lib_pattern in "${LIBS_TO_FIX[@]}"; do
         otool -L "$dylib" | grep -i "$lib_pattern" | awk '{print $1}' | while read -r CURRENT_REF; do
-            if [ -z "$CURRENT_REF" ] || [[ "$CURRENT_REF" == "@executable_path"* ]]; then continue; fi
+            if [ -z "$CURRENT_REF" ] || [[ "$CURRENT_REF" == "@executable_path"* ]] || [[ "$CURRENT_REF" == "@rpath"* ]]; then continue; fi
             
             if [[ "$CURRENT_REF" == /opt/homebrew* ]] || [[ "$CURRENT_REF" == /usr/local* ]] || [[ "$CURRENT_REF" == "$DEPS_INSTALL_DIR"* ]]; then
                 DEP_NAME=$(basename "$CURRENT_REF")
-                echo "    Fixing dependency $lib_pattern: $CURRENT_REF -> @executable_path/../Frameworks/$DEP_NAME"
-                install_name_tool -change "$CURRENT_REF" "@executable_path/../Frameworks/$DEP_NAME" "$dylib" || true
+                echo "    Fixing dependency $lib_pattern: $CURRENT_REF -> @rpath/$DEP_NAME"
+                install_name_tool -change "$CURRENT_REF" "@rpath/$DEP_NAME" "$dylib" || true
             fi
         done
     done
@@ -176,7 +185,7 @@ done
 # 3. Ad-hoc sign everything (Required for Apple Silicon after modifying binaries)
 echo "Ad-hoc signing the bundle..."
 # Sign dylibs first, then plugins, then the main app
-find "$APP_DIR" -type f -name "*.dylib" -exec codesign --force --verify --verbose --sign - {} \;
+find "$APP_DIR" -type f \( -name "*.dylib" -o -name "*.so" \) -exec codesign --force --verify --verbose --sign - {} \;
 find "$APP_DIR/Contents/PlugIns" -type f -name "*.dylib" -exec codesign --force --verify --verbose --sign - {} \;
 codesign --force --verify --verbose --sign - "$EXE_PATH"
 codesign --force --verify --verbose --sign - "$APP_DIR"

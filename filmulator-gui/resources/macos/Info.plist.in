@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key>
-	<string>filmulator-gui</string>
+	<string>filmulator</string>
 	<key>CFBundleGetInfoString</key>
 	<string>Filmulator 1.0.0</string>
 	<key>CFBundleIconFile</key>
