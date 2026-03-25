@@ -137,15 +137,19 @@ LIBS_TO_FIX=(
 # Ensure everything in Frameworks is writable
 chmod -R +w "$FRAMEWORKS_DIR"
 
-# Add @executable_path/../Frameworks to RPATH if not already there
-echo "Fixing RPATH in binary..."
+# Standardize RPATH
+echo "Cleaning up RPATHs..."
+# Remove redundant/wrong RPATHs
+install_name_tool -delete_rpath "@loader_path/../Frameworks" "$EXE_PATH" 2>/dev/null || true
+install_name_tool -delete_rpath "@executable_path/../Frameworks" "$EXE_PATH" 2>/dev/null || true
+# Add one clean RPATH
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXE_PATH" || true
 
 # 1. Update the executable to use @rpath/ for our libs
 echo "Fixing references in binary..."
 for lib_pattern in "${LIBS_TO_FIX[@]}"; do
     otool -L "$EXE_PATH" | grep -i "$lib_pattern" | awk '{print $1}' | while read -r CURRENT_REF; do
-        if [ -z "$CURRENT_REF" ] || [[ "$CURRENT_REF" == "@executable_path"* ]] || [[ "$CURRENT_REF" == "@rpath"* ]]; then continue; fi
+        if [ -z "$CURRENT_REF" ] || [[ "$CURRENT_REF" == "@executable_path"* ]] || [[ "$CURRENT_REF" == "@rpath"* ]] || [[ "$CURRENT_REF" == "@loader_path"* ]]; then continue; fi
         
         if [[ "$CURRENT_REF" == /opt/homebrew* ]] || [[ "$CURRENT_REF" == /usr/local* ]] || [[ "$CURRENT_REF" == "$DEPS_INSTALL_DIR"* ]]; then
             LIB_NAME=$(basename "$CURRENT_REF")
@@ -171,7 +175,7 @@ for dylib in "$FRAMEWORKS_DIR"/*.dylib; do
     # Fix its own dependencies
     for lib_pattern in "${LIBS_TO_FIX[@]}"; do
         otool -L "$dylib" | grep -i "$lib_pattern" | awk '{print $1}' | while read -r CURRENT_REF; do
-            if [ -z "$CURRENT_REF" ] || [[ "$CURRENT_REF" == "@executable_path"* ]] || [[ "$CURRENT_REF" == "@rpath"* ]]; then continue; fi
+            if [ -z "$CURRENT_REF" ] || [[ "$CURRENT_REF" == "@executable_path"* ]] || [[ "$CURRENT_REF" == "@rpath"* ]] || [[ "$CURRENT_REF" == "@loader_path"* ]]; then continue; fi
             
             if [[ "$CURRENT_REF" == /opt/homebrew* ]] || [[ "$CURRENT_REF" == /usr/local* ]] || [[ "$CURRENT_REF" == "$DEPS_INSTALL_DIR"* ]]; then
                 DEP_NAME=$(basename "$CURRENT_REF")
@@ -184,11 +188,10 @@ done
 
 # 3. Ad-hoc sign everything (Required for Apple Silicon after modifying binaries)
 echo "Ad-hoc signing the bundle..."
-# Sign dylibs first, then plugins, then the main app
-find "$APP_DIR" -type f \( -name "*.dylib" -o -name "*.so" \) -exec codesign --force --verify --verbose --sign - {} \;
-find "$APP_DIR/Contents/PlugIns" -type f -name "*.dylib" -exec codesign --force --verify --verbose --sign - {} \;
-codesign --force --verify --verbose --sign - "$EXE_PATH"
-codesign --force --verify --verbose --sign - "$APP_DIR"
+# Remove existing signatures to ensure a clean state
+find "$APP_DIR" -type f -exec codesign --remove-signature {} \; 2>/dev/null || true
+# Sign everything recursively and thoroughly
+codesign --force --deep --sign - "$APP_DIR"
 
 # Create zip archive
 echo "Creating zip archive..."
