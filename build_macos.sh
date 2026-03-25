@@ -51,7 +51,13 @@ if ! cmake --find-package -DNAME=rtprocess -DCOMPILER_ID=AppleClang -DLANGUAGE=C
     echo "rtprocess (librtprocess) not found. Building from source..."
     TMP_RT_DIR="/tmp/librtprocess_build"
     rm -rf "$TMP_RT_DIR"
-    git clone --depth 1 https://github.com/Beep6581/librtprocess.git "$TMP_RT_DIR"
+    
+    CLONE_URL="https://github.com/Beep6581/librtprocess.git"
+    if [ -n "$GITHUB_TOKEN" ]; then
+        CLONE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/Beep6581/librtprocess.git"
+    fi
+    
+    git clone --depth 1 "$CLONE_URL" "$TMP_RT_DIR"
     cd "$TMP_RT_DIR"
     mkdir build && cd build
     cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$DEPS_INSTALL_DIR"
