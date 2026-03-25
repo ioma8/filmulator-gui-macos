@@ -5,10 +5,19 @@ echo "Starting macOS build for Filmulator..."
 
 # Ensure Homebrew is in path
 if [[ $(arch) == "arm64" ]]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
+    HOMEBREW_PREFIX="/opt/homebrew"
 else
-    eval "$(/usr/local/bin/brew shellenv)"
+    HOMEBREW_PREFIX="/usr/local"
 fi
+eval "$($HOMEBREW_PREFIX/bin/brew shellenv)"
+
+# Fix for git clone in CI
+export GIT_TERMINAL_PROMPT=0
+
+# Help compilers find keg-only dependencies
+export LDFLAGS="-L$HOMEBREW_PREFIX/opt/libarchive/lib -L$HOMEBREW_PREFIX/opt/curl/lib $LDFLAGS"
+export CPPFLAGS="-I$HOMEBREW_PREFIX/opt/libarchive/include -I$HOMEBREW_PREFIX/opt/curl/include $CPPFLAGS"
+export PKG_CONFIG_PATH="$HOMEBREW_PREFIX/opt/libarchive/lib/pkgconfig:$HOMEBREW_PREFIX/opt/curl/lib/pkgconfig:$PKG_CONFIG_PATH"
 
 # Dependencies
 DEPENDENCIES=(
