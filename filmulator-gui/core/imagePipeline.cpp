@@ -749,7 +749,7 @@ matrix<unsigned short>& ImagePipeline::processImage(ParameterManager * paramMana
 
         //Lensfun processing
         cout << "lensfun start" << endl;
-        lfDatabase *ldb = lf_db_create();
+        lfDatabase *ldb = new lfDatabase();
         QDir dir = QDir::home();
         QString dirstr = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
         dirstr.append("/filmulator/version_2");
@@ -796,37 +796,21 @@ matrix<unsigned short>& ImagePipeline::processImage(ParameterManager * paramMana
                 lens = lensList[0];
 
                 //Now we set up the modifier itself with the lens and processing flags
-#ifdef LF_GIT
-                lfModifier * mod = new lfModifier(lens, demosaicParam.focalLength, cropFactor, width, height, LF_PF_F32);
-#else //lensfun v0.3.95
-                lfModifier * mod = new lfModifier(cropFactor, width, height, LF_PF_F32);
-#endif
+                lfModifier * mod = new lfModifier(lens, cropFactor, width, height);
 
-                int modflags = 0;
+                int initflags = 0;
                 if (demosaicParam.lensfunCA && !isMonochrome)
-                {
-#ifdef LF_GIT
-                    modflags |= mod->EnableTCACorrection();
-#else //lensfun v0.3.95
-                    modflags |= mod->EnableTCACorrection(lens, demosaicParam.focalLength);
-#endif
-                }
+                    initflags |= LF_MODIFY_TCA;
                 if (demosaicParam.lensfunVignetting)
-                {
-#ifdef LF_GIT
-                    modflags |= mod->EnableVignettingCorrection(demosaicParam.fnumber, 1000.0f);
-#else //lensfun v0.3.95
-                    modflags |= mod->EnableVignettingCorrection(lens, demosaicParam.focalLength, demosaicParam.fnumber, 1000.0f);
-#endif
-                }
+                    initflags |= LF_MODIFY_VIGNETTING;
+                if (demosaicParam.lensfunDistortion)
+                    initflags |= LF_MODIFY_DISTORTION | LF_MODIFY_SCALE;
+
+                int modflags = mod->Initialize(lens, LF_PF_F32, demosaicParam.focalLength,
+                                               demosaicParam.fnumber, 1000.0f, 0.0f,
+                                               LF_RECTILINEAR, initflags, false);
                 if (demosaicParam.lensfunDistortion)
                 {
-#ifdef LF_GIT
-                    modflags |= mod->EnableDistortionCorrection();
-#else //lensfun v0.3.95
-                    modflags |= mod->EnableDistortionCorrection(lens, demosaicParam.focalLength);
-#endif
-                    modflags |= mod->EnableScaling(mod->GetAutoScale(false));
                     cout << "Auto scale factor: " << mod->GetAutoScale(false) << endl;
                 }
 

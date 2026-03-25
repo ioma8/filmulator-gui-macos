@@ -186,7 +186,7 @@ static void remove_exif_keys(Exiv2::ExifData &exifData, const char *keys[], unsi
             {
                 exifData.erase(pos);
             }
-        } catch (Exiv2::AnyError &e) {
+        } catch (Exiv2::Error &e) {
             //catch invalid tag
         }
     }

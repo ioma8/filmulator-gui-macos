@@ -63,13 +63,13 @@ if (EXIV2_INCLUDE_DIR AND NOT EXIV2_VERSION)
         file(READ ${EXIV2_INCLUDE_DIR}/exiv2/exv_conf.h EXIV2_VERSION_CONTENT)
     endif()
 
-    string(REGEX MATCH "#define EXIV2_MAJOR_VERSION +\\( *([0-9]+) *\\)"  _dummy "${EXIV2_VERSION_CONTENT}")
+    string(REGEX MATCH "#define EXIV2_MAJOR_VERSION +\\( *([0-9]+)[Uu]? *\\)"  _dummy "${EXIV2_VERSION_CONTENT}")
     set(EXIV2_VERSION_MAJOR "${CMAKE_MATCH_1}")
 
-    string(REGEX MATCH "#define EXIV2_MINOR_VERSION +\\( *([0-9]+) *\\)"  _dummy "${EXIV2_VERSION_CONTENT}")
+    string(REGEX MATCH "#define EXIV2_MINOR_VERSION +\\( *([0-9]+)[Uu]? *\\)"  _dummy "${EXIV2_VERSION_CONTENT}")
     set(EXIV2_VERSION_MINOR "${CMAKE_MATCH_1}")
 
-    string(REGEX MATCH "#define EXIV2_PATCH_VERSION +\\( *([0-9]+) *\\)"  _dummy "${EXIV2_VERSION_CONTENT}")
+    string(REGEX MATCH "#define EXIV2_PATCH_VERSION +\\( *([0-9]+)[Uu]? *\\)"  _dummy "${EXIV2_VERSION_CONTENT}")
     set(EXIV2_VERSION_PATCH "${CMAKE_MATCH_1}")
 
     set(EXIV2_VERSION "${EXIV2_VERSION_MAJOR}.${EXIV2_VERSION_MINOR}.${EXIV2_VERSION_PATCH}")

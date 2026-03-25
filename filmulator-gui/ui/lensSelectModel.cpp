@@ -26,7 +26,7 @@ LensSelectModel::LensSelectModel(QObject *parent) : QAbstractTableModel(parent)
     dirstr.append("/filmulator/version_1");
     std::string stdstring = dirstr.toStdString();
 
-    ldb = lf_db_create();
+    ldb = new lfDatabase();
     if (!ldb)
     {
         cout << "Failed to create database!" << endl;

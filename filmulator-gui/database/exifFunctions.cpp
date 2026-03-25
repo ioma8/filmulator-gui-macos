@@ -123,7 +123,7 @@ int exifDefaultRotation(const std::string fullFilename)
         int exifOrientation;
         try
         {
-            exifOrientation = (int) exifData["Exif.Image.Orientation"].value().toLong();
+            exifOrientation = (int) exifData["Exif.Image.Orientation"].value().toInt64();
         }
         catch (...)
         {
@@ -295,7 +295,7 @@ int exifRating(const std::string fullFilename)
         std::string maker = exifData["Exif.Image.Make"].toString();
         if (maker.compare("Canon") == 0)
         {
-            return min(5,max(0,(int) xmpData["Xmp.xmp.Rating"].toLong()));
+            return min(5,max(0,(int) xmpData["Xmp.xmp.Rating"].toInt64()));
         }
         return 0;
     }
@@ -512,7 +512,7 @@ QString identifyLens(const std::string fullFilename)
         return "";
     }
 
-    lfDatabase *ldb = lf_db_create();
+    lfDatabase *ldb = new lfDatabase();
     QDir dir = QDir::home();
     QString dirstr = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
     dirstr.append("/filmulator/version_2");
