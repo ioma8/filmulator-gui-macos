@@ -42,24 +42,36 @@ for dep in "${DEPENDENCIES[@]}"; do
 done
 
 # Paths
-PROJECT_ROOT=$(pwd)
-DEPS_INSTALL_DIR="$PROJECT_ROOT/deps"
-mkdir -p "$DEPS_INSTALL_DIR"
+# Fix for git clone in CI
+export GIT_TERMINAL_PROMPT=0
+# Disable interactive prompts for git
+git config --global core.askPass "" || true
 
+# Dependencies
+...
 # Build librtprocess if not found in brew or local deps
 if ! cmake --find-package -DNAME=rtprocess -DCOMPILER_ID=AppleClang -DLANGUAGE=CXX -DMODE=EXIST -DCMAKE_PREFIX_PATH="$DEPS_INSTALL_DIR" > /dev/null 2>&1; then
     echo "rtprocess (librtprocess) not found. Building from source..."
     TMP_RT_DIR="/tmp/librtprocess_build"
     rm -rf "$TMP_RT_DIR"
-    
-    # Use plain HTTPS for public repo. 
-    # Token-based URL caused "Repository not found" in CI.
-    git clone --depth 1 https://github.com/Beep6581/librtprocess.git "$TMP_RT_DIR" || \
-    git clone --depth 1 https://github.com/CarVac/librtprocess.git "$TMP_RT_DIR"
-    
+
+    # Official Filmulator-preferred fork
+    CLONE_URL="https://github.com/CarVac/librtprocess.git"
+
+    git clone --depth 1 "$CLONE_URL" "$TMP_RT_DIR"
+
     cd "$TMP_RT_DIR"
     mkdir build && cd build
-    cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$DEPS_INSTALL_DIR"
+    # librtprocess also needs OpenMP help on macOS
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="$DEPS_INSTALL_DIR" \
+        -DOpenMP_CXX_FLAGS="-Xpreprocessor;-fopenmp;-I$LIBOMP_PATH/include" \
+        -DOpenMP_CXX_LIB_NAMES="omp" \
+        -DOpenMP_C_FLAGS="-Xpreprocessor;-fopenmp;-I$LIBOMP_PATH/include" \
+        -DOpenMP_C_LIB_NAMES="omp" \
+        -DOpenMP_omp_LIBRARY="$LIBOMP_PATH/lib/libomp.dylib" \
+        -DOpenMP_libomp_LIBRARY="$LIBOMP_PATH/lib/libomp.dylib"
     make -j$(sysctl -n hw.ncpu) install
     cd "$PROJECT_ROOT"
 fi
