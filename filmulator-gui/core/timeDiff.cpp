@@ -1,4 +1,4 @@
-/* 
+/*
  * This file is part of Filmulator.
  *
  * Copyright 2013 Omer Mano and Carlo Vaccari
@@ -16,15 +16,11 @@
  * You should have received a copy of the GNU General Public License
  * along with Filmulator. If not, see <http://www.gnu.org/licenses/>
  */
-#include <sys/time.h>
-#include <cstddef>
+#include "filmSim.hpp"
+#include <chrono>
 
-double timeDiff(struct timeval start)
-{
-    struct timeval end;
-    long seconds, useconds;
-    gettimeofday(&end,NULL);
-    seconds = end.tv_sec - start.tv_sec;
-    useconds = end.tv_usec - start.tv_usec;
-    return (seconds + useconds/1000000.0);
+double timeDiff(std::chrono::steady_clock::time_point start) {
+  auto end = std::chrono::steady_clock::now();
+  std::chrono::duration<double> diff = end - start;
+  return diff.count();
 }

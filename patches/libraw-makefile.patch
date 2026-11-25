@@ -1,24 +1,8 @@
-From 1b160c66aca3d8192c483835d5aeb7928a5f048e Mon Sep 17 00:00:00 2001
-From: CarVac <c.lo.to.da.down.lo@gmail.com>
-Date: Wed, 12 Sep 2018 21:45:07 -0400
-Subject: [PATCH] patch makefile
-
----
- Makefile.dist | 10 +++++-----
- 1 file changed, 5 insertions(+), 5 deletions(-)
-
 diff --git a/Makefile.dist b/Makefile.dist
-index cb2f159..793cfe0 100644
+index 61194a07..a1597d9f 100644
 --- a/Makefile.dist
 +++ b/Makefile.dist
-@@ -1,12 +1,12 @@
- all: library all_samples
- 
--#CFLAGS=-arch i386 -arch x86_64 -O3  -I. -w
--CFLAGS=-O3  -I. -w
-+CFLAGS=-march=i386 -march=x86-64 -O3  -I. -w
-+#CFLAGS=-O3  -I. -w
- CC=gcc
+@@ -6,7 +6,7 @@ CC=gcc
  CXX=g++
  
  # OpenMP support
@@ -27,17 +11,63 @@ index cb2f159..793cfe0 100644
  
  # RawSpeed Support
  #CFLAGS+=-pthread -DUSE_RAWSPEED -I../RawSpeed -I/usr/local/include/libxml2
-@@ -22,8 +22,8 @@ CXX=g++
+@@ -26,10 +26,10 @@ CFLAGS+=-DUSE_ZLIB
+ LDADD+=-lz
+ 
+ # JPEG support for lossy DNG
+-#CFLAGS+=-DUSE_JPEG -I/usr/local/include
+-#LDADD+=-L/usr/local/lib -ljpeg
++CFLAGS+=-DUSE_JPEG -I/usr/local/include
++LDADD+=-L/usr/local/lib -ljpeg
+ # LIBJPEG8:
+-#CFLAGS+=-DUSE_JPEG8
++CFLAGS+=-DUSE_JPEG8
+ 
+ # LCMS support
+ #CFLAGS+=-DUSE_LCMS -I/usr/local/include
+diff --git a/Makefile.mingw b/Makefile.mingw
+index f2c291e2..a3715b48 100644
+--- a/Makefile.mingw
++++ b/Makefile.mingw
+@@ -5,7 +5,7 @@ CC=gcc
+ CXX=g++
+ 
+ # OpenMP support
+-#CFLAGS+=-fopenmp
++CFLAGS+=-fopenmp
+ 
+ # RawSpeed Support
+ #CFLAGS+=-pthread -DUSE_RAWSPEED -I../RawSpeed -I/usr/local/include/libxml2
+@@ -21,10 +21,10 @@ CXX=g++
  #LDADD+=-L/usr/local/lib -ljasper
  
  # JPEG support for lossy DNG
 -#CFLAGS+=-DUSE_JPEG -I/usr/local/include
 -#LDADD+=-L/usr/local/lib -ljpeg
-+CFLAGS+=-DUSE_JPEG
-+LDADD+=-ljpeg
++CFLAGS+=-DUSE_JPEG -Ic:/msys64/mingw64/include
++LDADD+=-Lc:/msys64/mingw64/lib -ljpeg
  # LIBJPEG8:
- #CFLAGS+=-DUSE_JPEG8
+-#CFLAGS+=-DUSE_JPEG8
++CFLAGS+=-DUSE_JPEG8
  
--- 
-2.17.1
-
+ # LCMS support
+ #CFLAGS+=-DUSE_LCMS -I/usr/local/include
+@@ -75,15 +75,15 @@ LR_INCLUDES=libraw/libraw.h libraw/libraw_alloc.h \
+   libraw/libraw_internal.h libraw/libraw_types.h \
+   libraw/libraw_version.h
+ 
+-library: lib/libraw.a
++library: lib/libraw.a lib/libraw_r.a
+ 
+ all_samples: bin/raw-identify bin/simple_dcraw  bin/dcraw_emu bin/dcraw_half bin/mem_image \
+              bin/unprocessed_raw bin/4channels bin/multirender_test bin/postprocessing_benchmark \
+              bin/rawtextdump
+ 
+ install: library
+-	@if [ -d /usr/local/include ] ; then cp -R libraw /usr/local/include/ ; else echo 'no /usr/local/include' ; fi
+-	@if [ -d /usr/local/lib ] ; then cp lib/libraw.a lib/libraw_r.a /usr/local/lib/ ; else echo 'no /usr/local/lib' ; fi
++	@if [ -d c:/msys64/mingw64/include ] ; then cp -R libraw c:/msys64/mingw64/include/ ; else echo 'no c:/msys64/mingw64/include' ; fi
++	@if [ -d c:/msys64/mingw64/lib ] ; then cp lib/libraw.a lib/libraw_r.a c:/msys64/mingw64/lib/ ; else echo 'no c:/msys64/mingw64/lib' ; fi
+ 
+ install-binaries: all_samples
+ 	@if [ -d /usr/local/bin ] ; then cp bin/[a-z]* /usr/local/bin/ ; else echo 'no /usr/local/bin' ; fi

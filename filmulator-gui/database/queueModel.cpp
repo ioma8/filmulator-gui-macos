@@ -295,11 +295,11 @@ void QueueModel::batchForget()
     query.exec("BEGIN TRANSACTION;");
 
     //Read out the parameters of images in the queue that we don't want to delete
-    query.prepare("SELECT QTsortedIndex, "  //0
-                  "       QTprocessed, "    //1
-                  "       QTexported, "     //2
-                  "       QToutput, "       //3
-                  "       QTsearchID "      //4
+    query.prepare("SELECT QTsortedIndex "  //0
+                  "      ,QTprocessed "    //1
+                  "      ,QTexported "     //2
+                  "      ,QToutput "       //3
+                  "      ,QTsearchID "     //4
                   "FROM QueueTable "
                   "INNER JOIN ( "
                   "    SELECT STsearchID "
@@ -609,6 +609,7 @@ float QueueModel::getActivePosition(const QString searchID)
     query.exec();
     query.next();
     const int currentIndex = query.value(0).toInt();
+    query.finish();
 
     //index 0 out of 2 should be 0 (left)
     //index 1 out of 2 should be 1 (right)

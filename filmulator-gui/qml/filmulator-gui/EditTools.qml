@@ -20,6 +20,7 @@ SlimSplitView {
     property bool leveling
     property bool imageError
     property bool onEditTab
+    property bool helpMode: false
     property string saveStatus: ""
 
     signal tooltipWanted(string text, int x, int y)
@@ -114,11 +115,43 @@ SlimSplitView {
                         ToolTip {
                             id: rawHistoTooltip
                             tooltipText: qsTr("This is a histogram of the data in the raw file.")
+                            instant: root.helpMode
                             Component.onCompleted: {
                                 rawHistoTooltip.tooltipWanted.connect(root.tooltipWanted)
                             }
                         }
                     }
+                }
+
+                ToolSwitch {
+                    id: demosaicMethod
+                    text: qsTr("Demosaic Method")
+                    tooltipText: !paramManager.autoCaAvail ? qsTr("Switch this control on to reduce line-shaped noise artifacts at the expense of fine detail.") : qsTr("Switch this control on to make noise less visible at the expense of fine detail.")
+                    isOn: (paramManager.demosaicMethod == 1)
+                    defaultOn: (paramManager.defDemosaicMethod == 1)
+                    visible: paramManager.demosaicAvail //it's available for both bayer and x-trans but not some sraw
+                    onIsOnChanged: {
+                        paramManager.demosaicMethod = isOn ? 1 : 0
+                        paramManager.writeback()
+                    }
+                    onResetToDefault: {
+                        paramManager.demosaicMethod = defaultOn ? 1 : 0
+                        paramManager.writeback()
+                    }
+                    Connections {
+                        target: paramManager
+                        function onDemosaicMethodChanged() {
+                            demosaicMethod.isOn = (paramManager.demosaicMethod == 1)
+                        }
+                        function onDefDemosaicMethodChanged() {
+                            demosaicMethod.defaultOn = (paramManager.defDemosaicMethod == 1)
+                        }
+                    }
+                    tooltipInstant: root.helpMode
+                    Component.onCompleted: {
+                        demosaicMethod.tooltipWanted.connect(root.tooltipWanted)
+                    }
+                    uiScale: root.uiScale
                 }
 
                 ToolSlider {
@@ -131,6 +164,8 @@ SlimSplitView {
                     tickmarksEnabled: true
                     value: paramManager.caEnabled
                     defaultValue: paramManager.defCaEnabled
+                    boldTickEnabled: true
+                    boldValue: defaultValue
                     visible: paramManager.autoCaAvail
                     property bool bindingLoopCutoff: true
                     onValueChanged: {
@@ -153,8 +188,407 @@ SlimSplitView {
                             autoCASlider.defaultValue = paramManager.defCaEnabled
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         autoCASlider.tooltipWanted.connect(root.tooltipWanted)
+                        bindingLoopCutoff = false
+                    }
+                    uiScale: root.uiScale
+                }
+
+                ToolSlider {
+                    id: highlightRecoverySlider
+                    title: qsTr("Highlight Recovery")
+                    tooltipText: qsTr("Recover clipped highlights.\n\n0 clips after the preliminary white balance.\n1 is useful if 0 has restricted the red or blue channels in situations where no raw color channels are clipped.\n2 enables highlight reconstruction, which works best when only one channel is clipped, and when purple fringing isn't a problem.")
+                    minimumValue: 0
+                    maximumValue: 2
+                    stepSize: 1
+                    tickmarksEnabled: true
+                    value: paramManager.highlights
+                    defaultValue: paramManager.defHighlights
+                    boldTickEnabled: true
+                    boldValue: defaultValue
+                    visible: paramManager.colorAvail //requires color images
+                    property bool bindingLoopCutoff: true
+                    onValueChanged: {
+                        if (!bindingLoopCutoff) {
+                            paramManager.highlights = value
+                        }
+                    }
+                    onEditComplete: paramManager.writeback()
+                    Connections {
+                        target: paramManager
+                        function onHighlightsChanged() {
+                            highlightRecoverySlider.value = paramManager.highlights
+                        }
+                        function onDefHighlightsChanged() {
+                            highlightRecoverySlider.defaultValue = paramManager.defHighlights
+                        }
+                    }
+                    tooltipInstant: root.helpMode
+                    Component.onCompleted: {
+                        highlightRecoverySlider.tooltipWanted.connect(root.tooltipWanted)
+                        bindingLoopCutoff = false
+                    }
+                    uiScale: root.uiScale
+                }
+
+                ToolSlider {
+                    id: exposureCompSlider
+                    title: qsTr("Exposure Compensation")
+                    tooltipText: qsTr("The amount the program should to over- or under-expose the \"film\" relative to the captured exposure. Analogous to exposure of film in-camera. Usually, adjust this until the pre-filmulator histogram uses the full width.")
+                    minimumValue: -3
+                    maximumValue: 8
+                    stepSize: 1/6
+                    tickmarksEnabled: true
+                    tickmarkFactor: 6
+                    boldTickEnabled: true
+                    boldValue: 0
+                    value: paramManager.exposureComp
+                    defaultValue: paramManager.defExposureComp
+                    valueText: value.toFixed(4)
+                    onValueChanged: {
+                        paramManager.exposureComp = value
+                    }
+                    onEditComplete: paramManager.writeback()
+                    Connections {
+                        target: paramManager
+                        function onExposureCompChanged() {
+                            exposureCompSlider.value = paramManager.exposureComp
+                        }
+                        function onDefExposureCompChanged() {
+                            exposureCompSlider.defaultValue = paramManager.defExposureComp
+                        }
+                    }
+                    tooltipInstant: root.helpMode
+                    Component.onCompleted: {
+                        exposureCompSlider.tooltipWanted.connect(root.tooltipWanted)
+                    }
+                    uiScale: root.uiScale
+                }
+
+                Rectangle {
+                    id: wbButtonRect
+                    Layout.preferredHeight: 36 * uiScale
+                    Layout.fillWidth: true
+                    color: Colors.darkGray
+                    visible: paramManager.colorAvail //requires color images
+
+                    ToolButton {
+                        id: saveWbButton
+                        width: parent.width/2
+                        height: parent.height
+                        x: 0
+                        y: 0
+                        notDisabled: root.imageReady || root.previewReady //an image needs to be loaded
+                        text: qsTr("Store WB","white balance; keep short")
+                        tooltipText: qsTr("Save the current white balance settings for later use with images from the same camera. They remain stored until Filmulator is closed, or until overwritten by clicking this button again.")
+                        onTriggered: {
+                            paramManager.saveCustomWb()
+                        }
+                        tooltipInstant: root.helpMode
+                        Component.onCompleted: {
+                            saveWbButton.tooltipWanted.connect(root.tooltipWanted)
+                        }
+                        uiScale: root.uiScale
+                    }
+
+                    ToolButton {
+                        id: recallWbButton
+                        width: parent.width/2
+                        height: parent.height
+                        x: width
+                        y: 0
+                        notDisabled: (root.imageReady || root.previewReady) && paramManager.customWbAvail
+                        text: qsTr("Recall WB","white balance; keep short")
+                        tooltipText: paramManager.customWbAvail ? qsTr("Apply the stored white balance settings.") : qsTr("No white balance has been stored for this camera.")
+                        onTriggered: {
+                            paramManager.recallCustomWb()
+                        }
+                        tooltipInstant: root.helpMode
+                        Component.onCompleted: {
+                            recallWbButton.tooltipWanted.connect(root.tooltipWanted)
+                        }
+                        uiScale: root.uiScale
+                    }
+                }
+
+                ToolSlider {
+                    id: temperatureSlider
+                    title: qsTr("Temperature")
+                    tooltipText: qsTr("Correct the image color for a light source of the indicated Kelvin temperature.\n\nThe default value is the camera's chosen WB.")
+                    minimumValue: Math.log(1700)//limited by the 5D Classic @ 1674
+                    maximumValue: Math.log(20000)
+                    value: Math.log(paramManager.temperature)
+                    defaultValue: Math.log(paramManager.defTemperature)
+                    valueText: Math.exp(value).toFixed(1)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
+                    visible: paramManager.colorAvail //requires color images
+                    onValueChanged: {
+                        paramManager.temperature = Math.exp(value)
+                    }
+                    onEditComplete: paramManager.writeback()
+                    Connections {
+                        target: paramManager
+                        function onTemperatureChanged() {
+                            temperatureSlider.value = Math.log(paramManager.temperature)
+                        }
+                        function onDefTemperatureChanged() {
+                            temperatureSlider.defaultValue = Math.log(paramManager.defTemperature)
+                        }
+                    }
+                    tooltipInstant: root.helpMode
+                    Component.onCompleted: {
+                        temperatureSlider.tooltipWanted.connect(root.tooltipWanted)
+                    }
+                    uiScale: root.uiScale
+                }
+
+                ToolSlider {
+                    id: tintSlider
+                    title: qsTr("Tint")
+                    tooltipText: qsTr("Correct for a green/magenta tinted light source. Larger values are greener, and smaller values are magenta.\n\nThe default value is the camera's chosen WB.")
+                    minimumValue: Math.log(0.1)
+                    maximumValue: Math.log(10)
+                    value: Math.log(paramManager.tint)
+                    defaultValue: Math.log(paramManager.defTint)
+                    valueText: Math.exp(value).toFixed(4)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
+                    visible: paramManager.colorAvail //requires color images
+                    onValueChanged: {
+                        paramManager.tint = Math.exp(value)
+                    }
+                    onEditComplete: paramManager.writeback()
+                    Connections {
+                        target: paramManager
+                        function onTintChanged() {
+                            tintSlider.value = Math.log(paramManager.tint)
+                        }
+                        function onDefTintChanged() {
+                            tintSlider.defaultValue = Math.log(paramManager.defTint);
+                        }
+                    }
+                    tooltipInstant: root.helpMode
+                    Component.onCompleted: {
+                        tintSlider.tooltipWanted.connect(root.tooltipWanted)
+                    }
+                    uiScale: root.uiScale
+                }
+
+                ToolSwitch {
+                    id: nrEnabledSwitch
+                    text: qsTr("Noise Reduction")
+                    tooltipText: qsTr("Enable the noise reduction tools to help remove grain and color splotches from the image.")
+                    isOn: paramManager.nrEnabled
+                    defaultOn: paramManager.defNrEnabled
+                    onIsOnChanged: {
+                        paramManager.nrEnabled = isOn
+                        paramManager.writeback()
+                    }
+                    onResetToDefault: {
+                        paramManager.nrEnabled = defaultOn
+                        paramManager.writeback()
+                    }
+                    Connections {
+                        target: paramManager
+                        function onNrEnabledChanged() {
+                            nrEnabledSwitch.isOn = paramManager.nrEnabled
+                        }
+                        function onDefNrEnabledChanged() {
+                            nrEnabledSwitch.defaultOn = paramManager.defNrEnabled
+                        }
+                    }
+                    tooltipInstant: root.helpMode
+                    Component.onCompleted: {
+                        nrEnabledSwitch.tooltipWanted.connect(root.tooltipWanted)
+                    }
+                    uiScale: root.uiScale
+                }
+
+                ToolSlider {
+                    id: nlStrengthSlider
+                    visible: nrEnabledSwitch.isOn
+                    highlight: nrEnabledSwitch.hovered
+                    title: qsTr("NR Strength")
+                    tooltipText: qsTr("General-purpose noise reduction that reduces both brightness and color noise. When set to zero, this is disabled. This may cause speckles, so use Speckle NR to remove them.")
+                    minimumValue: 0
+                    maximumValue: Math.sqrt(0.1)
+                    valueText: (value/Math.sqrt(0.1)*100).toFixed(2)
+                    value: Math.sqrt(paramManager.nlStrength)
+                    defaultValue: Math.sqrt(paramManager.defNlStrength)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
+                    property bool bindingLoopCutoff: true
+                    onValueChanged: {
+                        if (!bindingLoopCutoff) {
+                            paramManager.nlStrength = value*value
+                        }
+                    }
+                    onEditComplete: paramManager.writeback()
+                    Connections {
+                        target: paramManager
+                        function onNlStrengthChanged() {
+                            nlStrengthSlider.value = Math.sqrt(paramManager.nlStrength)
+                        }
+                        function onDefNlStrengthChanged() {
+                            nlStrengthSlider.defaultValue = Math.sqrt(paramManager.defNlStrength)
+                        }
+                    }
+                    tooltipInstant: root.helpMode
+                    Component.onCompleted: {
+                        nlStrengthSlider.tooltipWanted.connect(root.tooltipWanted)
+                        bindingLoopCutoff = false
+                    }
+                    uiScale: root.uiScale
+                }
+
+                /*
+                ToolSlider {
+                    id: nlThresholdSlider
+                    visible: nrEnabledSwitch.isOn
+                    highlight: nrEnabledSwitch.hovered
+                    title: qsTr("NR Threshold")
+                    tooltipText: qsTr("The larger this value, the fewer patterns there are allowed to be reproduced in the output.")
+                    minimumValue: -9*Math.log(10)
+                    maximumValue: 1*Math.log(10)
+                    value: Math.log(paramManager.nlThresh)
+                    defaultValue: Math.log(paramManager.defNlThresh)
+                    valueText: Math.exp(value).toExponential(3)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
+                    property bool bindingLoopCutoff: true
+                    onValueChanged: {
+                        if (!bindingLoopCutoff) {
+                            paramManager.nlThresh = Math.exp(value)
+                        }
+                    }
+                    onEditComplete: paramManager.writeback()
+                    Connections {
+                        target: paramManager
+                        function onNlClustersChanged() {
+                            nlThresholdSlider.value = Math.log(paramManager.nlThresh)
+                        }
+                        function onDefNlClustersChanged() {
+                            nlThresholdSlider.defaultValue = Math.log(paramManager.defNlThresh)
+                        }
+                    }
+                    tooltipInstant: root.helpMode
+                    Component.onCompleted: {
+                        nlThresholdSlider.tooltipWanted.connect(root.tooltipWanted)
+                        bindingLoopCutoff = false
+                    }
+                    uiScale: root.uiScale
+                }
+                */
+
+                ToolSlider {
+                    id: nlClustersSlider
+                    visible: nrEnabledSwitch.isOn
+                    highlight: nrEnabledSwitch.hovered
+                    title: qsTr("NR Gradients")
+                    tooltipText: qsTr("Increase this control if the standard noise reduction is causing posterization or banding on gradients. If no banding is visible, increasing this will have no effect besides making noise reduction slower.")//qsTr("Max number of clusters per tile, assuming each tile has enough varying detail")
+                    minimumValue: 5
+                    maximumValue: 100
+                    stepSize: 1
+                    value: paramManager.nlClusters
+                    defaultValue: paramManager.defNlClusters
+                    boldTickEnabled: true
+                    boldValue: defaultValue
+                    property bool bindingLoopCutoff: true
+                    onValueChanged: {
+                        if (!bindingLoopCutoff) {
+                            paramManager.nlClusters = value
+                        }
+                    }
+                    onEditComplete: paramManager.writeback()
+                    Connections {
+                        target: paramManager
+                        function onNlClustersChanged() {
+                            nlClustersSlider.value = paramManager.nlClusters
+                        }
+                        function onDefNlClustersChanged() {
+                            nlClustersSlider.defaultValue = paramManager.defNlClusters
+                        }
+                    }
+                    tooltipInstant: root.helpMode
+                    Component.onCompleted: {
+                        nlClustersSlider.tooltipWanted.connect(root.tooltipWanted)
+                        bindingLoopCutoff = false
+                    }
+                    uiScale: root.uiScale
+                }
+
+                ToolSlider {
+                    id: impulseThreshSlider
+                    visible: nrEnabledSwitch.isOn
+                    highlight: nrEnabledSwitch.hovered
+                    title: qsTr("Speckle NR Strength")
+                    tooltipText: qsTr("Remove isolated image speckles. Higher values increase the effect, but can smear real image detail. When set to zero, speckle noise reduction is disabled.")
+                    minimumValue: 0
+                    maximumValue: 10
+                    value: paramManager.impulseThresh
+                    defaultValue: paramManager.defImpulseThresh
+                    valueText: value.toFixed(3)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
+                    property bool bindingLoopCutoff: true
+                    onValueChanged: {
+                        if (!bindingLoopCutoff) {
+                            paramManager.impulseThresh = value
+                        }
+                    }
+                    onEditComplete: paramManager.writeback()
+                    Connections {
+                        target: paramManager
+                        function onChromaStrengthChanged() {
+                            impulseThreshSlider.value = paramManager.impulseThresh
+                        }
+                        function onDefChromaStrengthChanged() {
+                            impulseThreshSlider.defaultValue = paramManager.defImpulseThresh
+                        }
+                    }
+                    tooltipInstant: root.helpMode
+                    Component.onCompleted: {
+                        impulseThreshSlider.tooltipWanted.connect(root.tooltipWanted)
+                        bindingLoopCutoff = false
+                    }
+                    uiScale: root.uiScale
+                }
+
+                ToolSlider {
+                    id: chromaStrengthSlider
+                    visible: nrEnabledSwitch.isOn && paramManager.colorAvail //requires color images
+                    highlight: nrEnabledSwitch.hovered
+                    title: qsTr("Chroma NR Strength")
+                    tooltipText: qsTr("Reduce color noise. Works in combination with the above standard NR. Higher values increase the effect, but add color smearing. When set to zero, chroma noise reduction is disabled.")
+                    minimumValue: 0
+                    maximumValue: 100
+                    value: paramManager.chromaStrength
+                    defaultValue: paramManager.defChromaStrength
+                    valueText: value.toFixed(2)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
+                    property bool bindingLoopCutoff: true
+                    onValueChanged: {
+                        if (!bindingLoopCutoff) {
+                            paramManager.chromaStrength = value
+                        }
+                    }
+                    onEditComplete: paramManager.writeback()
+                    Connections {
+                        target: paramManager
+                        function onChromaStrengthChanged() {
+                            chromaStrengthSlider.value = paramManager.chromaStrength
+                        }
+                        function onDefChromaStrengthChanged() {
+                            chromaStrengthSlider.defaultValue = paramManager.defChromaStrength
+                        }
+                    }
+                    tooltipInstant: root.helpMode
+                    Component.onCompleted: {
+                        chromaStrengthSlider.tooltipWanted.connect(root.tooltipWanted)
                         bindingLoopCutoff = false
                     }
                     uiScale: root.uiScale
@@ -194,6 +628,7 @@ SlimSplitView {
                             lensfunCASwitch.defaultOn = (paramManager.defLensfunCa == 1)
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         lensfunCASwitch.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -225,6 +660,7 @@ SlimSplitView {
                             lensfunVignSwitch.defaultOn = (paramManager.defLensfunVign == 1)
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         lensfunVignSwitch.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -256,171 +692,9 @@ SlimSplitView {
                             lensfunDistSwitch.defaultOn = (paramManager.defLensfunDist == 1)
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         lensfunDistSwitch.tooltipWanted.connect(root.tooltipWanted)
-                    }
-                    uiScale: root.uiScale
-                }
-
-                ToolSlider {
-                    id: highlightRecoverySlider
-                    title: qsTr("Highlight Recovery")
-                    tooltipText: qsTr("Recover clipped highlights.\n\n0 clips after the preliminary white balance.\n1 is useful if 0 has restricted the red or blue channels in situations where no raw color channels are clipped.\n2 enables highlight reconstruction, which works best when only one channel is clipped, and when purple fringing isn't a problem.")
-                    minimumValue: 0
-                    maximumValue: 2
-                    stepSize: 1
-                    tickmarksEnabled: true
-                    value: paramManager.highlights
-                    defaultValue: paramManager.defHighlights
-                    property bool bindingLoopCutoff: true
-                    onValueChanged: {
-                        if (!bindingLoopCutoff) {
-                            paramManager.highlights = value
-                        }
-                    }
-                    onEditComplete: paramManager.writeback()
-                    Connections {
-                        target: paramManager
-                        function onHighlightsChanged() {
-                            highlightRecoverySlider.value = paramManager.highlights
-                        }
-                        function onDefHighlightsChanged() {
-                            highlightRecoverySlider.defaultValue = paramManager.defHighlights
-                        }
-                    }
-                    Component.onCompleted: {
-                        highlightRecoverySlider.tooltipWanted.connect(root.tooltipWanted)
-                        bindingLoopCutoff = false
-                    }
-                    uiScale: root.uiScale
-                }
-
-                Rectangle {
-                    id: wbButtonRect
-                    Layout.preferredHeight: 36 * uiScale
-                    Layout.fillWidth: true
-                    color: Colors.darkGray
-
-                    ToolButton {
-                        id: saveWbButton
-                        width: parent.width/2
-                        height: parent.height
-                        x: 0
-                        y: 0
-                        notDisabled: root.imageReady || root.previewReady //an image needs to be loaded
-                        text: qsTr("Store WB","white balance; keep short")
-                        tooltipText: qsTr("Save the current white balance settings for later use with images from the same camera. They remains stored until Filmulator is closed, or until overwritten with this button or the custom WB picker.")
-                        onTriggered: {
-                            paramManager.saveCustomWb()
-                        }
-                        Component.onCompleted: {
-                            saveWbButton.tooltipWanted.connect(root.tooltipWanted)
-                        }
-                        uiScale: root.uiScale
-                    }
-
-                    ToolButton {
-                        id: recallWbButton
-                        width: parent.width/2
-                        height: parent.height
-                        x: width
-                        y: 0
-                        notDisabled: (root.imageReady || root.previewReady) && paramManager.customWbAvail
-                        text: qsTr("Recall WB","white balance; keep short")
-                        tooltipText: paramManager.customWbAvail ? qsTr("Apply the stored white balance settings.") : qsTr("No white balance has been stored for this camera.")
-                        onTriggered: {
-                            paramManager.recallCustomWb()
-                        }
-                        Component.onCompleted: {
-                            recallWbButton.tooltipWanted.connect(root.tooltipWanted)
-                        }
-                        uiScale: root.uiScale
-                    }
-                }
-
-                ToolSlider {
-                    id: temperatureSlider
-                    title: qsTr("Temperature")
-                    tooltipText: qsTr("Correct the image color for a light source of the indicated Kelvin temperature.\n\nThe default value is the camera's chosen WB.")
-                    minimumValue: Math.log(2000)
-                    maximumValue: Math.log(20000)
-                    value: Math.log(paramManager.temperature)
-                    defaultValue: Math.log(paramManager.defTemperature)
-                    valueText: Math.exp(value).toFixed(1)
-                    onValueChanged: {
-                        paramManager.temperature = Math.exp(value)
-                    }
-                    onEditComplete: paramManager.writeback()
-                    Connections {
-                        target: paramManager
-                        function onTemperatureChanged() {
-                            temperatureSlider.value = Math.log(paramManager.temperature)
-                        }
-                        function onDefTemperatureChanged() {
-                            temperatureSlider.defaultValue = Math.log(paramManager.defTemperature)
-                        }
-                    }
-                    Component.onCompleted: {
-                        temperatureSlider.tooltipWanted.connect(root.tooltipWanted)
-                    }
-                    uiScale: root.uiScale
-                }
-
-                ToolSlider {
-                    id: tintSlider
-                    title: qsTr("Tint")
-                    tooltipText: qsTr("Correct for a green/magenta tinted light source. Larger values are greener, and smaller values are magenta.\n\nThe default value is the camera's chosen WB.")
-                    minimumValue: Math.log(0.1)
-                    maximumValue: Math.log(10)
-                    value: Math.log(paramManager.tint)
-                    defaultValue: Math.log(paramManager.defTint)
-                    valueText: Math.exp(value).toFixed(4)
-                    onValueChanged: {
-                        paramManager.tint = Math.exp(value)
-                    }
-                    onEditComplete: paramManager.writeback()
-                    Connections {
-                        target: paramManager
-                        function onTintChanged() {
-                            tintSlider.value = Math.log(paramManager.tint)
-                        }
-                        function onDefTintChanged() {
-                            tintSlider.defaultValue = Math.log(paramManager.defTint);
-                        }
-                    }
-                    Component.onCompleted: {
-                        tintSlider.tooltipWanted.connect(root.tooltipWanted)
-                    }
-                    uiScale: root.uiScale
-                }
-
-                ToolSlider {
-                    id: exposureCompSlider
-                    title: qsTr("Exposure Compensation")
-                    tooltipText: qsTr("The amount the program should to over- or under-expose the \"film\" relative to the captured exposure. Analogous to exposure of film in-camera. Usually, adjust this until the pre-filmulator histogram uses the full width.")
-                    minimumValue: -5
-                    maximumValue: 5
-                    stepSize: 1/6
-                    tickmarksEnabled: true
-                    tickmarkFactor: 6
-                    value: paramManager.exposureComp
-                    defaultValue: paramManager.defExposureComp
-                    valueText: value.toFixed(4)
-                    onValueChanged: {
-                        paramManager.exposureComp = value
-                    }
-                    onEditComplete: paramManager.writeback()
-                    Connections {
-                        target: paramManager
-                        function onExposureCompChanged() {
-                            exposureCompSlider.value = paramManager.exposureComp
-                        }
-                        function onDefExposureCompChanged() {
-                            exposureCompSlider.defaultValue = paramManager.defExposureComp
-                        }
-                    }
-                    Component.onCompleted: {
-                        exposureCompSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
                     uiScale: root.uiScale
                 }
@@ -466,6 +740,7 @@ SlimSplitView {
                         ToolTip {
                             id: preFilmTooltip
                             tooltipText: qsTr("This is a histogram of the input to the film simulation.")
+                            instant: root.helpMode
                             Component.onCompleted: {
                                 preFilmTooltip.tooltipWanted.connect(root.tooltipWanted)
                             }
@@ -482,6 +757,8 @@ SlimSplitView {
                     value: Math.sqrt(paramManager.toeBoundary)
                     defaultValue: Math.sqrt(paramManager.defToeBoundary)
                     valueText: (value*value/65535).toFixed(6)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
                     onValueChanged: {
                         paramManager.toeBoundary = value*value
                         //The parameter manager won't notify anything else that the param has changed, so we need to manually update the consumer
@@ -497,6 +774,7 @@ SlimSplitView {
                             toeSlider.defaultValue = Math.sqrt(paramManager.defToeBoundary)
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         toeSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -506,12 +784,14 @@ SlimSplitView {
                 ToolSlider {
                     id: rolloffSlider
                     title: qsTr("Highlight Rolloff Point")
-                    tooltipText: qsTr("Sets the point above which the highlights gently stop getting brighter. This controls the saturation of the highlights, and only has a significant effect at high drama settings when the highlights get strongly darkened.\nIf you have a photo with no highlight clipping and none of it extends beyond the right of the prefilm histogram, feel free to raise this all the way to 1.\nIf you have highlight clipping and there are unpleasant color shifts, lower this to taste.")
+                    tooltipText: qsTr("Sets the point above which the highlights gently stop getting brighter. This works together with Highlight Crosstalk to control saturation of the highlights.\nIf you have a photo with no highlight clipping and none of it extends beyond the right of the prefilm histogram, feel free to raise this all the way to 1.\nIf you have unpleasant color shifts from highlight clipping, or strong colors from LED lights, try lowering this and raising Highlight Crosstalk to taste.")
                     minimumValue: 1
                     maximumValue: 65535
                     value: paramManager.rolloffBoundary
                     defaultValue: paramManager.defRolloffBoundary
                     valueText: (value/65535).toFixed(6)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
                     onValueChanged: {
                         paramManager.rolloffBoundary = value
                         //The parameter manager won't notify anything else that the param has changed, so we need to manually update the consumer
@@ -527,8 +807,40 @@ SlimSplitView {
                             rolloffSlider.defaultValue = paramManager.defRolloffBoundary
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         rolloffSlider.tooltipWanted.connect(root.tooltipWanted)
+                    }
+                    uiScale: root.uiScale
+                }
+
+                ToolSlider {
+                    id: crosstalkSlider
+                    title: qsTr("Highlight Crosstalk")
+                    tooltipText: qsTr("This desaturates highlights as they get brighter past the highlight rolloff point, reducing ugly highlight colors and making deeply saturated colors appear brighter and closer to white.")
+                    minimumValue: 0
+                    maximumValue: 1
+                    value: Math.sqrt(paramManager.highlightCrosstalk)
+                    defaultValue: Math.sqrt(paramManager.defHighlightCrosstalk)
+                    valueText: (value*value).toFixed(6)
+                    boldTickEnabled: true
+                    visible: paramManager.colorAvail //requires color images
+                    onValueChanged: {
+                        paramManager.highlightCrosstalk = value*value
+                    }
+                    onEditComplete: paramManager.writeback()
+                    Connections {
+                        target: paramManager
+                        function onHighlightCrosstalkChanged() {
+                            crosstalkSlider.value = Math.sqrt(paramManager.highlightCrosstalk)
+                        }
+                        function onDefHighlightCrosstalkChanged() {
+                            crosstalkSlider.defaultValue = Math.sqrt(paramManager.defHighlightCrosstalk)
+                        }
+                    }
+                    tooltipInstant: root.helpMode
+                    Component.onCompleted: {
+                        crosstalkSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
                     uiScale: root.uiScale
                 }
@@ -544,6 +856,8 @@ SlimSplitView {
                     //The following thresholds are 24mmx65mm and twice 6x9cm film's
                     // areas, respectively.
                     valueText: (Math.exp(value*2)).toFixed(1)//(Math.exp(value*2) < 1560) ? "SF" : (Math.exp(value*2) < 9408) ? "MF" : "LF"
+                    boldTickEnabled: true
+                    boldValue: defaultValue
                     onValueChanged: {
                         paramManager.filmArea = Math.exp(value*2)
                     }
@@ -557,6 +871,7 @@ SlimSplitView {
                             filmSizeSlider.defaultValue = Math.log(Math.sqrt(paramManager.defFilmArea))
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         filmSizeSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -572,6 +887,8 @@ SlimSplitView {
                     value: 100*paramManager.layerMixConst
                     defaultValue: 100*paramManager.defLayerMixConst
                     valueText: value.toFixed(4)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
                     onValueChanged: {
                         paramManager.layerMixConst = value/100;
                     }
@@ -585,6 +902,7 @@ SlimSplitView {
                             filmDramaSlider.defaultValue = 100*paramManager.defLayerMixConst
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         filmDramaSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -614,6 +932,7 @@ SlimSplitView {
                             overdriveSwitch.defaultOn = (paramManager.defAgitateCount == 0)
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         overdriveSwitch.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -663,6 +982,7 @@ SlimSplitView {
                         ToolTip {
                             id: postFilmTooltip
                             tooltipText: qsTr("This is a histogram of the output from the film simulation.")
+                            instant: root.helpMode
                             Component.onCompleted: {
                                 postFilmTooltip.tooltipWanted.connect(root.tooltipWanted)
                             }
@@ -695,6 +1015,7 @@ SlimSplitView {
                             blackpointSlider.defaultValue = Math.sqrt(paramManager.defBlackpoint*1000)
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         blackpointSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -710,6 +1031,8 @@ SlimSplitView {
                     value: paramManager.whitepoint
                     defaultValue: paramManager.defWhitepoint
                     valueText: (value*500).toFixed(5)// 1000/2
+                    boldTickEnabled: true
+                    boldValue: defaultValue
                     onValueChanged: {
                         paramManager.whitepoint = value
                         //The parameter manager won't notify anything else that the param has changed, so we need to manually update the consumer
@@ -725,6 +1048,7 @@ SlimSplitView {
                             whitepointSlider.defaultValue = paramManager.defWhitepoint
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         whitepointSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -740,6 +1064,8 @@ SlimSplitView {
                     value: paramManager.shadowsY
                     defaultValue: paramManager.defShadowsY
                     valueText: (value*1000).toFixed(3)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
                     onValueChanged: {
                         paramManager.shadowsY = value
                     }
@@ -753,6 +1079,7 @@ SlimSplitView {
                             shadowBrightnessSlider.defaultValue = paramManager.defShadowsY
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         shadowBrightnessSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -768,6 +1095,8 @@ SlimSplitView {
                     value: paramManager.highlightsY
                     defaultValue: paramManager.defHighlightsY
                     valueText: (value*1000).toFixed(3)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
                     onValueChanged: {
                         paramManager.highlightsY = value
                     }
@@ -781,6 +1110,7 @@ SlimSplitView {
                             highlightBrightnessSlider.defaultValue = paramManager.defHighlightsY
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         highlightBrightnessSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -793,6 +1123,7 @@ SlimSplitView {
                     tooltipText: qsTr("Turn this on to convert to black-and-white.")
                     isOn: paramManager.monochrome
                     defaultOn: paramManager.defMonochrome
+                    visible: paramManager.colorAvail //requires color images
                     onIsOnChanged: {
                         paramManager.monochrome = isOn
                         paramManager.writeback()
@@ -810,6 +1141,7 @@ SlimSplitView {
                             monochromeSwitch.defaultOn = paramManager.defMonochrome
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         monochromeSwitch.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -818,7 +1150,7 @@ SlimSplitView {
 
                 ToolSlider {
                     id: vibranceSlider
-                    visible: !monochromeSwitch.isOn
+                    visible: !monochromeSwitch.isOn && paramManager.colorAvail //requires color images
                     highlight: monochromeSwitch.hovered
                     title: qsTr("Vibrance")
                     tooltipText: qsTr("This adjusts the vividness of the less-saturated colors in the image.")
@@ -827,6 +1159,8 @@ SlimSplitView {
                     value: paramManager.vibrance
                     defaultValue: paramManager.defVibrance
                     valueText: (value*200).toFixed(3)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
                     onValueChanged: {
                         paramManager.vibrance = value
                     }
@@ -840,6 +1174,7 @@ SlimSplitView {
                             vibranceSlider.defaultValue = paramManager.defVibrance
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         vibranceSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -848,7 +1183,7 @@ SlimSplitView {
 
                 ToolSlider {
                     id: saturationSlider
-                    visible: !monochromeSwitch.isOn
+                    visible: !monochromeSwitch.isOn && paramManager.colorAvail //requires color images
                     highlight: monochromeSwitch.hovered
                     title: qsTr("Saturation")
                     tooltipText: qsTr("This adjusts the vividness of the entire image.")
@@ -857,6 +1192,8 @@ SlimSplitView {
                     value: paramManager.saturation
                     defaultValue: paramManager.defSaturation
                     valueText: (value*200).toFixed(3)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
                     onValueChanged: {
                         paramManager.saturation = value
                     }
@@ -870,6 +1207,7 @@ SlimSplitView {
                             saturationSlider.defaultValue = paramManager.defSaturation
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         saturationSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -878,14 +1216,21 @@ SlimSplitView {
 
                 ToolSlider {
                     id: bwRmultSlider
-                    visible: monochromeSwitch.isOn
+                    visible: monochromeSwitch.isOn && paramManager.colorAvail //requires color images
                     highlight: monochromeSwitch.hovered
                     title: qsTr("Red Weight")
                     tooltipText: qsTr("How much to weight the red channel when converting to monochrome.")
-                    minimumValue: -2.0
+                    minimumValue: -1.0
                     maximumValue: 2.0
                     value: paramManager.bwRmult
                     defaultValue: paramManager.defBwRmult
+                    valueText: value.toFixed(5)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
+                    secondTickEnabled: true
+                    secondTickValue: 0
+                    thirdTickEnabled: true
+                    thirdTickValue: 1
                     onValueChanged: {
                         paramManager.bwRmult = value
                     }
@@ -899,6 +1244,7 @@ SlimSplitView {
                             bwRmultSlider.defaultValue = paramManager.defBwRmult
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         bwRmultSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -907,14 +1253,21 @@ SlimSplitView {
 
                 ToolSlider {
                     id: bwGmultSlider
-                    visible: monochromeSwitch.isOn
+                    visible: monochromeSwitch.isOn && paramManager.colorAvail //requires color images
                     highlight: monochromeSwitch.hovered
                     title: qsTr("Green Weight")
                     tooltipText: qsTr("How much to weight the green channel when converting to monochrome.")
-                    minimumValue: -2.0
+                    minimumValue: -1.0
                     maximumValue: 2.0
                     value: paramManager.bwGmult
                     defaultValue: paramManager.defBwGmult
+                    valueText: value.toFixed(5)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
+                    secondTickEnabled: true
+                    secondTickValue: 0
+                    thirdTickEnabled: true
+                    thirdTickValue: 1
                     onValueChanged: {
                         paramManager.bwGmult = value
                     }
@@ -928,6 +1281,7 @@ SlimSplitView {
                             bwGmultSlider.defaultValue = paramManager.defBwGmult
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         bwGmultSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -936,14 +1290,21 @@ SlimSplitView {
 
                 ToolSlider {
                     id: bwBmultSlider
-                    visible: monochromeSwitch.isOn
+                    visible: monochromeSwitch.isOn && paramManager.colorAvail //requires color images
                     highlight: monochromeSwitch.hovered
                     title: qsTr("Blue Weight")
                     tooltipText: qsTr("How much to weight the blue channel when converting to monochrome.")
-                    minimumValue: -2.0
+                    minimumValue: -1.0
                     maximumValue: 2.0
                     value: paramManager.bwBmult
                     defaultValue: paramManager.defBwBmult
+                    valueText: value.toFixed(5)
+                    boldTickEnabled: true
+                    boldValue: defaultValue
+                    secondTickEnabled: true
+                    secondTickValue: 0
+                    thirdTickEnabled: true
+                    thirdTickValue: 1
                     onValueChanged: {
                         paramManager.bwBmult = value
                     }
@@ -957,6 +1318,7 @@ SlimSplitView {
                             bwBmultSlider.defaultValue = paramManager.defBwBmult
                         }
                     }
+                    tooltipInstant: root.helpMode
                     Component.onCompleted: {
                         bwBmultSlider.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -1146,12 +1508,13 @@ SlimSplitView {
             y: 0
             notDisabled: root.imageReady && (!root.cropping) && (!root.leveling) && (!root.imageError)
             text: qsTr("Save TIFF")
-            tooltipText: root.cropping ? qsTr("Finish cropping to save the result.") : (root.leveling ? qsTr("Finish leveling to save the result.") : qsTr("Save a TIFF to the directory containing the raw file."))
+            tooltipText: root.cropping ? qsTr("Finish cropping to save the result.") : (root.leveling ? qsTr("Finish leveling to save the result.") : qsTr("Save a TIFF to the directory containing the raw file. If you've saved an output file before, it will be overwritten."))
             onTriggered: {
                 filmProvider.writeTiff()
                 queueModel.markSaved(paramManager.imageIndex)
                 root.saveStatus = "saved"
             }
+            tooltipInstant: root.helpMode
             Component.onCompleted: {
                 saveTIFFButton.tooltipWanted.connect(root.tooltipWanted)
             }
@@ -1165,7 +1528,7 @@ SlimSplitView {
             y: 0
             notDisabled: root.imageReady && (!root.cropping) && (!root.leveling) && (!root.imageError)
             text: qsTr("Save JPEG")
-            tooltipText: root.cropping ? qsTr("Finish cropping to save the result.") : (root.leveling ? qsTr("Finish leveling to save the result.") : qsTr("Save a JPEG to the directory containing the raw file."))
+            tooltipText: root.cropping ? qsTr("Finish cropping to save the result.") : (root.leveling ? qsTr("Finish leveling to save the result.") : qsTr("Save a JPEG to the directory containing the raw file. If you've saved an output file before, it will be overwritten."))
             onTriggered: {
                 filmProvider.writeJpeg()
                 queueModel.markSaved(paramManager.imageIndex)
@@ -1181,6 +1544,7 @@ SlimSplitView {
                     }
                 }
             }
+            tooltipInstant: root.helpMode
             Component.onCompleted: {
                 saveJPEGButton.tooltipWanted.connect(root.tooltipWanted)
             }

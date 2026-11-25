@@ -1,0 +1,674 @@
+name: CMake Build
+
+on:
+  push:
+    branches: [ "master", "main", "dev" ]
+  pull_request:
+    branches: [ "master", "main", "dev" ]
+
+permissions:
+  packages: write
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }}-build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            preset: release
+            triplet: x64-linux
+            generator: "Unix Makefiles"
+          - os: windows-latest
+            preset: release
+            triplet: x64-mingw-dynamic
+            generator: "MinGW Makefiles"
+          - os: macos-latest
+            preset: release
+            triplet: arm64-osx
+            generator: "Unix Makefiles"
+
+    env:
+      BUILD_TYPE: Release
+      VCPKG_BINARY_SOURCES: "clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite"
+      VCPKG_DEFAULT_TRIPLET: ${{ matrix.triplet }}
+      VCPKG_NUGET_TIMEOUT: 1200
+      VCPKG_TARGET_TRIPLET: ${{ matrix.triplet }}
+      CMAKE_GENERATOR: ${{ matrix.generator }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Free Disk Space (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        echo "Disk space before cleanup:"
+        df -h /
+        # Remove large pre-installed packages we don't need
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /opt/hostedtoolcache/CodeQL
+        sudo rm -rf /usr/local/share/powershell
+        sudo rm -rf /usr/share/swift
+        echo "Disk space after cleanup:"
+        df -h /
+
+    - name: Install Linux Dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+        sudo apt-get update
+        sudo apt-get build-dep -y qtbase5-dev
+        # Remove unwanted database headers so Qt doesn't compile their sqldrivers and create dependencies
+        sudo apt-get remove -y freetds-dev libsybdb5 unixodbc-dev libpq-dev libmysqlclient-dev || true
+        sudo apt-get install -y \
+          ninja-build \
+          mold \
+          autoconf \
+          autoconf-archive \
+          automake \
+          libtool \
+          libltdl-dev \
+          mono-complete
+
+    - name: Install macOS Dependencies
+      if: runner.os == 'macOS'
+      run: brew install libomp mono autoconf autoconf-archive automake libtool
+
+    - name: Install pkg-config (Windows)
+      if: runner.os == 'Windows'
+      run: choco install pkgconfiglite
+
+    - name: Setup vcpkg (lukka/run-vcpkg)
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgGitCommitId: b5d1a94fb7f88fd835e360fd23a45a09ceedbf48 # Matches baseline in vcpkg-configuration.json
+        vcpkgJsonGlob: 'vcpkg.json'
+
+    - name: Setup NuGet Credentials (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $nuget = $(vcpkg fetch nuget | Select-Object -Last 1)
+        & $nuget sources add `
+          -Source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" `
+          -StorePasswordInClearText `
+          -Name GitHubPackages `
+          -UserName "${{ github.repository_owner }}" `
+          -Password "${{ secrets.GITHUB_TOKEN }}"
+        & $nuget setapikey "${{ secrets.GITHUB_TOKEN }}" `
+          -Source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+
+    - name: Download NuGet (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl -sSL -o "$RUNNER_TEMP/nuget.exe" https://dist.nuget.org/win-x86-commandline/latest/nuget.exe
+        echo "NUGET_EXE=$RUNNER_TEMP/nuget.exe" >> "$GITHUB_ENV"
+
+    - name: Provide working 'nuget' on PATH (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        set -euo pipefail
+        cp "$NUGET_EXE" "$RUNNER_TEMP/nuget"
+        chmod +x "$RUNNER_TEMP/nuget"
+        echo "PATH=$RUNNER_TEMP:$PATH" >> "$GITHUB_ENV"
+
+    - name: Find NuGet (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        nuget_path=$(vcpkg fetch nuget | tail -n 1)
+        echo "NUGET_EXE=$nuget_path" >> "$GITHUB_ENV"
+
+    - name: Setup NuGet Credentials (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        mono "$NUGET_EXE" sources remove -Name GitHubPackages -Source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" || true
+        mono "$NUGET_EXE" sources add \
+          -Source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+          -StorePasswordInClearText \
+          -Name GitHubPackages \
+          -UserName "${{ github.repository_owner }}" \
+          -Password "${{ secrets.GITHUB_TOKEN }}"
+        mono "$NUGET_EXE" setapikey "${{ secrets.GITHUB_TOKEN }}" \
+          -Source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@latest
+
+    - name: Configure CMake
+      run: cmake --preset ${{ matrix.preset }} -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
+
+    - name: Print vcpkg ABI info
+      if: always()
+      shell: bash
+      run: |
+        echo "=== vcpkg ABI Info ==="
+        if [ ! -d "build/${{ matrix.preset }}/vcpkg_installed" ]; then
+            echo "Directory build/${{ matrix.preset }}/vcpkg_installed does not exist."
+            exit 0
+        fi
+        
+        found=0
+        while IFS= read -r f; do
+            found=1
+            echo "--------------------------------------------------------"
+            echo "FILE: $f"
+            echo "--------------------------------------------------------"
+            cat "$f"
+        done < <(find "build/${{ matrix.preset }}/vcpkg_installed" -name "*vcpkg_abi_info.txt" -type f 2>/dev/null)
+        
+        if [ $found -eq 0 ]; then
+            echo "No ABI info files found."
+        fi
+
+    - name: Build
+      run: cmake --build --preset ${{ matrix.preset }}
+
+    - name: Install (Windows)
+      if: runner.os == 'Windows'
+      run: cmake --install build/${{ matrix.preset }} --prefix build/installed --strip
+
+    - name: Bundle DLLs + Qt (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        # vcpkg manifest mode puts dependencies and tools inside the build directory
+        WINDEPLOY_PREFIX: ${{ github.workspace }}\build\${{ matrix.preset }}\vcpkg_installed\${{ matrix.triplet }}
+      run: |
+        $binDir = "$env:GITHUB_WORKSPACE\build\installed\bin"
+        $vcpkgBinDir = "$env:WINDEPLOY_PREFIX\bin"
+        
+        Write-Host "Bundling DLLs from $vcpkgBinDir to $binDir"
+        if (Test-Path $vcpkgBinDir) {
+            Copy-Item "$vcpkgBinDir\*.dll" $binDir -Force
+        } else {
+            Write-Error "Could not find vcpkg bin directory at $vcpkgBinDir"
+            exit 1
+        }
+        
+        Write-Host "Bundling compiler runtime DLLs..."
+        $mingwBin = Split-Path (Get-Command g++).Source
+        Write-Host "MinGW bin directory: $mingwBin"
+        $runtimeDlls = @("libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll", "libgomp-1.dll")
+        foreach ($dll in $runtimeDlls) {
+            $src = "$mingwBin\$dll"
+            if (Test-Path $src) {
+                Write-Host "Copying $dll from $mingwBin"
+                Copy-Item $src $binDir -Force
+            } else {
+                Write-Warning "Could not find $dll in $mingwBin"
+            }
+        }
+
+        Write-Host "Copying Qt plugins..."
+        # Copy essential Qt plugins
+        $pluginDirs = @("platforms", "imageformats", "iconengines", "styles", "sqldrivers")
+        foreach ($pluginDir in $pluginDirs) {
+            $srcPath = "$env:WINDEPLOY_PREFIX\plugins\$pluginDir"
+            $dstPath = "$binDir\$pluginDir"
+            if (Test-Path $srcPath) {
+                Write-Host "Copying $pluginDir plugins..."
+                Copy-Item $srcPath $dstPath -Recurse -Force
+            } else {
+                Write-Warning "Plugin directory not found: $srcPath"
+            }
+        }
+        
+        Write-Host "Copying QML modules..."
+        # Copy QML modules (Qt Quick related)
+        $qmlSrcDir = "$env:WINDEPLOY_PREFIX\qml"
+        if (Test-Path $qmlSrcDir) {
+            $qmlDirs = @("QtQuick", "QtQuick.2", "QtQml", "QtQuick\Controls.2", "QtQuick\Layouts", "QtQuick\Templates.2", "QtQuick\Window.2", "Qt\labs\platform", "Qt\labs\settings")
+            foreach ($qmlMod in $qmlDirs) {
+                $srcPath = "$qmlSrcDir\$qmlMod"
+                $dstPath = "$binDir\qml\$qmlMod"
+                if (Test-Path $srcPath) {
+                    Write-Host "Copying QML module: $qmlMod..."
+                    New-Item -ItemType Directory -Force -Path (Split-Path $dstPath) | Out-Null
+                    Copy-Item $srcPath $dstPath -Recurse -Force
+                } else {
+                    Write-Warning "QML module not found: $srcPath"
+                }
+            }
+        } else {
+            Write-Warning "QML directory not found at $qmlSrcDir"
+        }
+        
+        Write-Host "Stripping all EXEs and DLLs to significantly reduce package size..."
+        Get-ChildItem -Path $binDir -Recurse -Include *.exe, *.dll | ForEach-Object {
+            & strip $_.FullName
+        }
+
+        # Create qt.conf to help Qt find plugins and QML modules
+        Write-Host "Creating qt.conf..."
+        "[Paths]`nPlugins = .`nQml2Imports = ./qml" | Out-File -FilePath "$binDir\qt.conf" -Encoding ASCII
+        
+        Copy-Item "$env:GITHUB_WORKSPACE\LICENSE.txt" $binDir -Force
+        Copy-Item "$env:GITHUB_WORKSPACE\filmulator-gui\filmulator-gui80.ico" $binDir -Force
+        Copy-Item "$env:GITHUB_WORKSPACE\filmulator_build.iss" "$env:GITHUB_WORKSPACE\build\installed" -Force
+
+    - name: Install Inno Setup (Windows)
+      if: runner.os == 'Windows'
+      run: choco install innosetup -y
+
+    - name: Create Installer (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      working-directory: build/installed
+      run: |
+        $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+        if (-not (Test-Path $isccPath)) {
+            Write-Error "Inno Setup Compiler not found at $isccPath"
+            exit 1
+        }
+        
+        Write-Host "Running Inno Setup Compiler..."
+        & $isccPath "filmulator_build.iss"
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Inno Setup compilation failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        
+        Write-Host "Installer created successfully"
+        Get-ChildItem "$env:GITHUB_WORKSPACE\build\installed\output"
+
+    - name: Upload Windows Artifact
+      if: runner.os == 'Windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: filmulator-windows-installer
+        path: build/installed/output/FilmulatorSetup.exe
+
+    - name: Create AppImage (Linux)
+      if: runner.os == 'Linux'
+      env:
+        VCPKG_PREFIX: ${{ github.workspace }}/build/${{ matrix.preset }}/vcpkg_installed/${{ matrix.triplet }}
+      run: |
+        # Install dependencies for AppImage creation
+        sudo apt-get install -y fuse libfuse2 file patchelf
+
+        # Generate 256x256 icon from SVG
+        sudo apt-get install -y librsvg2-bin
+        rsvg-convert -w 256 -h 256 filmulator-gui/resources/filmulator64icon.svg \
+          -o filmulator-gui/resources/linux/filmulator.png
+
+        # Install to AppDir
+        cmake --install build/${{ matrix.preset }} --prefix AppDir/usr --strip
+
+        # Fix install layout: appimagetool expects executable at usr/bin/<name>
+        mkdir -p AppDir/usr/bin AppDir/usr/lib
+        [ -f AppDir/bin/filmulator ] && mv AppDir/bin/filmulator AppDir/usr/bin/filmulator || true
+
+        # 1. Xcb plugins (icccm, image, keysyms, etc.) are dlopen'd at runtime by Qt and 
+        # won't appear in ldd. Explicitly bundle them into the AppImage before running linuxdeploy
+        for plugin in icccm image keysyms randr render-util shape sync xfixes xinerama xkb xinput shm util composite damage; do
+          cp -P /usr/lib/x86_64-linux-gnu/libxcb-${plugin}.so* AppDir/usr/lib/ 2>/dev/null || true
+        done
+        # libxkbcommon is also dlopen'd and required by Qt's xcb platform plugin
+        cp -P /usr/lib/x86_64-linux-gnu/libxkbcommon*.so* AppDir/usr/lib/ 2>/dev/null || true
+        cp -P "${VCPKG_PREFIX}"/lib/libxkbcommon*.so* AppDir/usr/lib/ 2>/dev/null || true
+
+        # Use purely linuxdeploy to handle standard AppRun, icons, desktop file, and dynamic ldd chasing natively
+        wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+        chmod +x linuxdeploy-x86_64.AppImage
+
+        # Use appimage tool via extraction because runner prevents FUSE
+        APPIMAGE_EXTRACT_AND_RUN=1 \
+        ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/filmulator \
+            --desktop-file filmulator-gui/resources/linux/filmulator.desktop \
+            --icon-file filmulator-gui/resources/linux/filmulator.png \
+            --output appimage
+        
+
+
+    - name: Upload Linux Artifact
+      if: runner.os == 'Linux'
+      uses: actions/upload-artifact@v4
+      with:
+        name: filmulator-linux-appimage
+        path: Filmulator-x86_64.AppImage
+
+    - name: Bundle Qt (macOS)
+      if: runner.os == 'macOS'
+      env:
+        VCPKG_PREFIX: ${{ github.workspace }}/build/${{ matrix.preset }}/vcpkg_installed/${{ matrix.triplet }}
+      run: |
+        APP_BUNDLE="build/${{ matrix.preset }}/Filmulator.app"
+        
+        # vcpkg doesn't include macdeployqt, so we install Qt5 via brew for the tool
+        echo "Installing Qt5 via Homebrew for macdeployqt..."
+        brew install qt@5
+        
+        # Find macdeployqt from Homebrew Qt
+        MACDEPLOYQT=$(brew --prefix qt@5)/bin/macdeployqt
+        if [ ! -f "$MACDEPLOYQT" ]; then
+          echo "macdeployqt not found at $MACDEPLOYQT"
+          exit 1
+        fi
+        echo "Using: $MACDEPLOYQT"
+        
+        # Add vcpkg libs to path so macdeployqt can find them
+        export DYLD_LIBRARY_PATH="${VCPKG_PREFIX}/lib:${DYLD_LIBRARY_PATH:-}"
+        
+        echo "Running macdeployqt..."
+        "$MACDEPLOYQT" "$APP_BUNDLE" \
+          -qmldir=filmulator-gui/qml \
+          -verbose=2 \
+          -libpath="${VCPKG_PREFIX}/lib"
+        
+        echo "Bundling libomp manually..."
+        LIBOMP_DIR="$(brew --prefix libomp)/lib"
+        # In case Frameworks directory wasn't created by macdeployqt
+        mkdir -p "$APP_BUNDLE/Contents/Frameworks"
+        cp "$LIBOMP_DIR/libomp.dylib" "$APP_BUNDLE/Contents/Frameworks/"
+        install_name_tool -id @executable_path/../Frameworks/libomp.dylib "$APP_BUNDLE/Contents/Frameworks/libomp.dylib"
+        
+        LIBOMP_LINK_PATH=$(otool -L "$APP_BUNDLE/Contents/MacOS/filmulator" | awk '/libomp/{print $1}')
+        if [ -n "$LIBOMP_LINK_PATH" ]; then
+          install_name_tool -change "$LIBOMP_LINK_PATH" @executable_path/../Frameworks/libomp.dylib "$APP_BUNDLE/Contents/MacOS/filmulator"
+        else
+          echo "Warning: libomp not found in otool -L output. Might not be linked."
+        fi
+        
+        echo "Bundle contents:"
+        ls -la "$APP_BUNDLE/Contents/MacOS/"
+        ls -la "$APP_BUNDLE/Contents/Frameworks/" || echo "No Frameworks dir yet"
+
+    - name: Ad-hoc sign the bundle (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        APP_BUNDLE="build/${{ matrix.preset }}/Filmulator.app"
+        echo "Ad-hoc signing the entire bundle..."
+        codesign --force --deep -s - "$APP_BUNDLE"
+
+    - name: Create DMG (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install create-dmg
+        
+        APP_BUNDLE="build/${{ matrix.preset }}/Filmulator.app"
+        
+        # create-dmg can fail on minor issues, so we allow it to fail and check output
+        create-dmg \
+          --volname "Filmulator" \
+          --volicon "filmulator-gui/resources/macos/icon.icns" \
+          --window-pos 200 120 \
+          --window-size 600 400 \
+          --icon-size 100 \
+          --icon "Filmulator.app" 150 185 \
+          --app-drop-link 450 185 \
+          --hide-extension "Filmulator.app" \
+          "Filmulator-macOS-${{ matrix.triplet }}.dmg" \
+          "$APP_BUNDLE" || true
+        
+        # Verify DMG was created
+        if [ -f "Filmulator-macOS-${{ matrix.triplet }}.dmg" ]; then
+          echo "DMG created successfully"
+          ls -la *.dmg
+        else
+          echo "DMG creation failed"
+          exit 1
+        fi
+
+    - name: Upload macOS Artifact
+      if: runner.os == 'macOS'
+      uses: actions/upload-artifact@v4
+      with:
+        name: filmulator-macos-dmg
+        path: Filmulator-macOS-*.dmg
+
+  test-installers:
+    name: ${{ matrix.os }}-test
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            triplet: x64-linux
+          - os: windows-latest
+            triplet: x64-mingw-dynamic
+          - os: macos-latest
+            triplet: arm64-osx
+
+    steps:
+    - name: Download Linux Artifact
+      if: runner.os == 'Linux'
+      uses: actions/download-artifact@v4
+      with:
+        name: filmulator-linux-appimage
+
+    - name: Download macOS Artifact
+      if: runner.os == 'macOS'
+      uses: actions/download-artifact@v4
+      with:
+        name: filmulator-macos-dmg
+
+    - name: Download Windows Artifact
+      if: runner.os == 'Windows'
+      uses: actions/download-artifact@v4
+      with:
+        name: filmulator-windows-installer
+
+    - name: Test AppImage (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        APPIMAGE="Filmulator-x86_64.AppImage"
+        
+        echo "Verifying AppImage exists..."
+        if [ ! -f "$APPIMAGE" ]; then
+          echo "AppImage not found at $APPIMAGE"
+          exit 1
+        fi
+        
+        echo "Making AppImage executable..."
+        chmod +x "$APPIMAGE"
+        
+        echo "Checking AppImage structure..."
+        ./"$APPIMAGE" --appimage-help || true
+        
+        # Install xvfb for headless X11 testing, libfuse2 for AppImage (missing on ubuntu-24.04 runners)
+        # Also install system-level OpenGL graphics libraries (libgl1, libegl1) since headless runners lack them by default.
+        sudo apt-get update && sudo apt-get install -y xvfb libfuse2 libgl1 libegl1
+        
+        echo "Running smoke test with xvfb..."
+        # Use xvfb-run to provide virtual X11 display for xcb platform
+        xvfb-run -a ./"$APPIMAGE" &> smoke_test.log &
+        APP_PID=$!
+        
+        # Give it time to load and initialize
+        sleep 10
+        
+        # Check if process is still running
+        if ! ps -p $APP_PID > /dev/null; then
+          echo "Application exited prematurely"
+          echo "--- Output Log ---"
+          cat smoke_test.log || echo "(no log captured)"
+          exit 1
+        fi
+        
+        echo "Application started successfully. Smoke test passed!"
+        kill $APP_PID 2>/dev/null || true
+
+    - name: Test DMG (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        DMG="Filmulator-macOS-${{ matrix.triplet }}.dmg"
+        
+        echo "Verifying DMG exists..."
+        if [ ! -f "$DMG" ]; then
+          echo "DMG not found at $DMG"
+          exit 1
+        fi
+        
+        echo "Mounting DMG..."
+        MOUNT_OUTPUT=$(hdiutil attach "$DMG" -nobrowse -readonly)
+        echo "$MOUNT_OUTPUT"
+        VOLUME=$(echo "$MOUNT_OUTPUT" | grep "/Volumes/" | sed 's/.*\(\/Volumes\/.*\)/\1/')
+        echo "Mounted at: $VOLUME"
+        
+        echo "Checking bundle structure..."
+        APP_BUNDLE="$VOLUME/Filmulator.app"
+        if [ ! -d "$APP_BUNDLE" ]; then
+          echo "App bundle not found in DMG"
+          hdiutil detach "$VOLUME"
+          exit 1
+        fi
+        
+        echo "Contents of app bundle:"
+        ls -la "$APP_BUNDLE/Contents/MacOS/"
+        ls -la "$APP_BUNDLE/Contents/Frameworks/" || echo "No Frameworks directory"
+        ls -la "$APP_BUNDLE/Contents/PlugIns/" || echo "No PlugIns directory"
+        
+        # Verify essential files exist
+        echo "Verifying bundle contents..."
+        CHECKS=("MacOS/filmulator" "Frameworks/QtCore.framework" "Frameworks/QtQuick.framework")
+        for check in "${CHECKS[@]}"; do
+          if [ -e "$APP_BUNDLE/Contents/$check" ]; then
+            echo "✓ Found $check"
+          else
+            echo "✗ Missing $check"
+          fi
+        done
+        
+        # Copy to temporary location for testing (can't run from mounted DMG)
+        TEST_DIR="$HOME/filmulator_test"
+        mkdir -p "$TEST_DIR"
+        cp -R "$APP_BUNDLE" "$TEST_DIR/"
+        
+        echo "Running smoke test..."
+        # macOS runners have a display server, so cocoa platform should work
+        LAUNCHER="$TEST_DIR/Filmulator.app/Contents/MacOS/filmulator-gui"
+        if [ ! -f "$LAUNCHER" ]; then
+          echo "Error: Launcher script not found at $LAUNCHER"
+          exit 1
+        fi
+
+        # Make sure launcher is executable
+        chmod +x "$LAUNCHER"
+        
+        "$LAUNCHER" &> smoke_test.log &
+        APP_PID=$!
+        
+        # Give it time to load and initialize
+        sleep 10
+        
+        # Check if process is still running
+        if ! ps -p $APP_PID > /dev/null; then
+          echo "Application exited prematurely or crashed"
+          echo "--- Smoke Test Log ---"
+          cat smoke_test.log || echo "(no log captured)"
+          
+          # Try to get more info from system log if it crashed
+          echo "--- Tail of system console log (last 50 lines) ---"
+          log show --predicate 'process == "filmulator"' --last 2m | tail -n 50
+          
+          hdiutil detach "$VOLUME" || true
+          exit 1
+        fi
+        
+        echo "Application started successfully. Smoke test passed!"
+        kill $APP_PID 2>/dev/null || true
+        
+        # Cleanup
+        hdiutil detach "$VOLUME"
+        rm -rf "$TEST_DIR"
+
+    - name: Test Installer (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        QT_QUICK_BACKEND: software
+        QT_QPA_PLATFORM: offscreen
+      run: |
+        # Github artifact download implicitly flattens to the workspace root
+        $installer = "FilmulatorSetup.exe"
+        $installDir = "${{ github.workspace }}\test_install"
+        Write-Host "Installing Filmulator to $installDir..."
+        Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/DIR=""$installDir""" -Wait
+        
+        $exePath = "$installDir\filmulator.exe"
+        if (-not (Test-Path $exePath)) {
+            Write-Error "Executable not found after installation at $exePath"
+            exit 1
+        }
+
+        Write-Host "Verifying bundle structure..."
+        Write-Host "Contents of $installDir/qt.conf:"
+        if (Test-Path "$installDir\qt.conf") { Get-Content "$installDir\qt.conf" } else { Write-Warning "qt.conf MISSING!" }
+        
+        $checks = @("platforms\qwindows.dll", "qml\QtQuick\Controls.2", "qml\QtQuick\Layouts")
+        foreach ($check in $checks) {
+            if (Test-Path "$installDir\$check") {
+                Write-Host "Found $check"
+            } else {
+                Write-Warning "$check is MISSING from the bundle!"
+            }
+        }
+        
+        Write-Host "Running dependency check with ldd on main EXE..."
+        # Add installDir to PATH temporarily so ldd can find local DLLs
+        $oldPath = $env:PATH
+        $env:PATH = "$installDir;$oldPath"
+        & ldd $exePath
+        
+        if (Test-Path "$installDir\platforms\qwindows.dll") {
+            Write-Host "Running dependency check with ldd on platform plugin..."
+            & ldd "$installDir\platforms\qwindows.dll"
+        }
+        $env:PATH = $oldPath
+        
+        Write-Host "Running smoke test on installed application..."
+        $outputLog = "${{ github.workspace }}\smoke_test_output.log"
+        $errorLog = "${{ github.workspace }}\smoke_test_error.log"
+        $startTime = Get-Date
+        
+        # Start the process and capture output
+        $process = Start-Process -FilePath $exePath -PassThru -RedirectStandardOutput $outputLog -RedirectStandardError $errorLog
+        
+        # Give it some time to load DLLs and fail if there's an issue
+        Start-Sleep -Seconds 10
+        
+        if ($process.HasExited) {
+            $exitCode = $process.ExitCode
+            Write-Host "Application exited prematurely with code $exitCode." -ForegroundColor Red
+            
+            Write-Host "--- Standard Output ---"
+            if (Test-Path $outputLog) { Get-Content $outputLog } else { Write-Host "(no output captured)" }
+            Write-Host "--- Standard Error ---"
+            if (Test-Path $errorLog) { Get-Content $errorLog } else { Write-Host "(no error captured)" }
+            
+            Write-Host "--- Querying Windows Event Logs for Application Errors ---"
+            $events = Get-EventLog -LogName Application -After $startTime -EntryType Error -Newest 10 | Where-Object { $_.Source -match "Application Error" -or $_.Source -match "SideBySide" }
+            if ($events) { $events | Format-List } else { Write-Host "No relevant Event Log entries found." }
+            
+            exit 1
+        }
+        
+        Write-Host "Application started successfully. Smoke test passed!"
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+
+    # Tests will be added later when the test framework is set up
+    # - name: Test
+    #   run: ctest --preset ${{ matrix.preset }}

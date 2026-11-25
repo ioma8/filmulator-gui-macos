@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Filmulator
+Comment=Simple raw photo editor based on film development
+Exec=filmulator
+Icon=filmulator
+Categories=Graphics;Photography;
+Terminal=false

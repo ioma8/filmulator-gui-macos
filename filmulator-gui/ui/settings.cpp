@@ -282,7 +282,7 @@ void Settings::setPreviewResolution(int resolutionIn)
 int Settings::getPreviewResolution()
 {
     QSettings settings(QSettings::UserScope, "Filmulator", "Filmulator");
-    //Default: 1000 pixels wide
+    //Default: 1500 pixels wide
     previewResolution = settings.value("edit/previewResolution", 1500).toInt();
     emit previewResolutionChanged();
     return previewResolution;
@@ -314,7 +314,7 @@ void Settings::checkLensfunStatus()
     lensfunStatus = "checking";
     emit lensfunStatusChanged();
 
-    lf_db_return dbStatus = lensfun_dbcheck(2, dirstr.toStdString());
+    lf_db_return dbStatus = lensfun_dbcheck(1, dirstr.toStdString());
 
     if (dbStatus == LENSFUN_DBUPDATE_NOVERSION)
     {
@@ -346,7 +346,7 @@ void Settings::updateLensfun()
     updateStatus = "updating";
     emit updateStatusChanged();
 
-    lf_db_return dbStatus = lensfun_dbupdate(2, dirstr.toStdString());
+    lf_db_return dbStatus = lensfun_dbupdate(1, dirstr.toStdString());
 
     if (dbStatus == LENSFUN_DBUPDATE_OK)
     {

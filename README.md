@@ -16,46 +16,80 @@ The program's design ideology is to have the best tool for any job, and only tha
 
 # Building Filmulator
 
-This program depends on:
+## Building with vcpkg (Recommended)
+
+**vcpkg** is the recommended way to build Filmulator. It automatically manages all dependencies across Windows, macOS, and Linux.
+
+### Prerequisites
+
+1. Install vcpkg:
+```bash
+git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg && ./bootstrap-vcpkg.sh  # or bootstrap-vcpkg.bat on Windows
 ```
-libtiff
-libgomp
-libexiv2
-libjpeg
-libraw
-librtprocess 0.10
-liblensfun 0.3.95 exactly for Windows, and the latest git version for Linux and MacOS
-libcurl
-libarchive
+
+2. Install system dependencies (for building some packages in vcpkg):
+- **macOS**: `brew install pkg-config ninja libomp autoconf autoconf-archive automake libtool`
+- **Linux**: `sudo apt install pkg-config ninja-build`
+
+3. Set the `VCPKG_ROOT` environment variable:
+```bash
+export VCPKG_ROOT=/path/to/vcpkg  # Add to your shell profile
 ```
+
+### Build Steps
+
+```bash
+cmake --preset relwithdebinfo
+cmake --build build/relwithdebinfo -j$(nproc)
+```
+
+The first build will take time as vcpkg downloads and compiles dependencies. Subsequent builds use cached packages.
+
+### Available Presets
+
+- `debug` - Debug build with symbols
+- `release` - Optimized release build
+- `relwithdebinfo` - Release with debug info (recommended for development)
+
+---
+
+## Legacy Build Methods
+
+### Dependencies (Manual Installation)
+
+If not using vcpkg, you need these libraries installed:
+```
+libtiff, libgomp, libexiv2, libjpeg, libraw, librtprocess, liblensfun, libcurl, libarchive
+```
+And Qt 5.15 or newer.
+
 We highly encourage you to compile libraw yourself to ensure you have support for recent cameras.
 
-It also requires Qt 5.15 or newer: open the `.pro` file from Qt Creator and select `Build` in order to run it. You may have to initialize the build configurations upon first loading the project; I suggest you add the `-j#` flag to the `Make build` parameters to speed compilation.
+### Building with CMake (Linux)
 
-A note: Use a standalone git client to clone the repository initially, and then you can use Qt Creator's built-in git tools.
-
-## Building with CMake:
-
-Inside the `filmulator-gui` directory, create a build directory.
+Create a build directory and navigate to inside that directory.
 
 Run `cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/usr ..` If you are using a binary release of Qt from them, use -DCMAKE\_PREFIX\_PATH=\[path to the qt dir and version and arch\] as an argument.
 
 Then run `make` and run `make install` as root.
 
-## Building on MacOS:
+### Building on macOS
 
-The easiest way to build on macOS (Intel or Apple Silicon) is to use the provided build script. It will automatically install dependencies via Homebrew, build required libraries, and create a bundled application.
+The easiest way to build on macOS (Intel or Apple Silicon) is to use the provided build script. It installs dependencies via Homebrew, builds librtprocess, and creates a bundled application with relative `@rpath` references and an ad-hoc signature.
 
 1. Ensure you have [Homebrew](https://brew.sh/) installed.
 2. Run the build script from the project root:
    ```bash
    ./build_macos.sh
    ```
-3. The resulting application and a zip archive will be in `filmulator-gui/build/`.
+3. The application bundle and zip archive are written to `build/`.
+
+CMake now lives at the repository root (upstream's vcpkg layout). `build_macos.sh` configures that root `CMakeLists.txt`.
 
 ### Continuous Integration (GitHub Actions)
 
-A GitHub Actions workflow is available to build the macOS version automatically. It can be triggered manually from the "Actions" tab in the repository. It will create a release draft with the built binaries attached.
+`.github/workflows/macos-build.yml` builds the macOS bundle with `build_macos.sh`. Trigger it manually from the Actions tab; it opens a release draft with the zip attached. Upstream's `cmake.yml` also builds macOS through vcpkg, macdeployqt, and ad-hoc codesign.
 
 # Using Filmulator
 

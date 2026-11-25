@@ -7,6 +7,7 @@ using std::endl;
 
 LensSelectModel::LensSelectModel(QObject *parent) : QAbstractTableModel(parent)
 {
+    cout << "LensSelectModel initializing lensfun" << endl;
     //generate role names, which are constant
     m_roleNames[Qt::UserRole + 0 + 1] = "make";
     m_roleNames[Qt::UserRole + 1 + 1] = "model";
@@ -21,18 +22,43 @@ LensSelectModel::LensSelectModel(QObject *parent) : QAbstractTableModel(parent)
     scoreList.clear();
 
     //initialize lensfun db
-    QDir dir = QDir::home();
     QString dirstr = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-    dirstr.append("/filmulator/version_1");
-    std::string stdstring = dirstr.toStdString();
+    dirstr.append("/filmulator/version_1/");
+    //cout << "LensSelectModel lensfun dirstring: " << dirstr.toStdString() << endl;
+    QDir dir(dirstr);
+    QStringList filters;
+    filters << "*.xml";
+    QFileInfoList fileList = dir.entryInfoList(filters, QDir::Files | QDir::NoDotAndDotDot);
 
-    ldb = new lfDatabase();
+    ldb = lf_db_new();
     if (!ldb)
     {
-        cout << "Failed to create database!" << endl;
+        cout << "LensSelectModel lensfun failed to create database!" << endl;
     }
 
-    ldb->Load(stdstring.c_str());
+    foreach (const QFileInfo &fileInfo, fileList) {
+        const QString filename = fileInfo.absoluteFilePath();
+        const std::string stdstring = filename.toStdString();
+        //cout << "LensSelectModel lensfun loading file " << stdstring << endl;
+        lfError loadError = ldb->Load(stdstring.c_str());
+        if (loadError == LF_WRONG_FORMAT)
+        {
+            cout << "LensSelectModel lensfun loading file " << stdstring << endl;
+            cout << "LensSelectModel lensfun database wrong format!" << endl;
+        }
+        else if (loadError == LF_NO_DATABASE)
+        {
+            cout << "LensSelectModel lensfun loading file " << stdstring << endl;
+            cout << "LensSelectModel lensfun no database found!" << endl;
+        }
+        else if (loadError == LF_NO_ERROR)
+        {
+            //cout << "LensSelectModel lensfun database loaded" << endl;
+        } else {
+            cout << "LensSelectModel lensfun loading file " << stdstring << endl;
+            cout << "LensSelectModel lensfun what happened? " << loadError << endl;
+        }
+    }
 }
 
 LensSelectModel::~LensSelectModel()
@@ -52,10 +78,13 @@ void LensSelectModel::update(QString cameraString, QString lensString)
 
     QString tempLensString = lensString;
     bool searchAllMounts = false;
-    if (lensString.front() == "\\")
-    {
-        tempLensString.remove(0,1);
-        searchAllMounts = true;
+    if (lensString.length() > 0) {
+        if (lensString.front() == "\\")
+        {
+            tempLensString.remove(0,1);
+            searchAllMounts = true;
+            cout << "LensSelectModel lensfun searching all mounts" << endl;
+        }
     }
     std::string lensStr = tempLensString.toStdString();
 
@@ -66,10 +95,13 @@ void LensSelectModel::update(QString cameraString, QString lensString)
     scoreList.clear();
 
     const lfCamera * camera = NULL;
-    const lfCamera ** cameraList = ldb->FindCamerasExt(NULL, camStr.c_str());
+    const lfCamera ** cameraList = ldb->FindCameras(NULL, camStr.c_str());
     if (cameraList && !searchAllMounts)
     {
         camera = cameraList[0];
+        cout << "LensSelectModel lensfun camera: " << camera->Model << endl;
+    } else {
+        cout << "LensSelectModel lensfun no camera; camStr: " << camStr.c_str() << endl;
     }
     lf_free(cameraList);
 

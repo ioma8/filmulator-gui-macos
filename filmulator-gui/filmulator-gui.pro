@@ -25,7 +25,20 @@ SOURCES += main.cpp \
     core/imwriteTiff.cpp \
     core/layerMix.cpp \
     core/mergeExps.cpp \
+    core/nlmeans/bisecting_kmeans.cpp \
+    core/nlmeans/calcC1chanT.cpp \
+    core/nlmeans/calcW_generic.cpp \
+    core/nlmeans/expandDims.cpp \
+    core/nlmeans/highDimBoxFilter.cpp \
+    core/nlmeans/kMeansNLMApprox.cpp \
+    core/nlmeans/splitCluster.cpp \
     core/outputFile.cpp \
+    core/rawtherapee/FTblockDN.cc \
+    core/rawtherapee/boxblur.cc \
+    core/rawtherapee/cplx_wavelet_dec.cc \
+    core/rawtherapee/gauss.cc \
+    core/rawtherapee/impulse_denoise.cc \
+    core/rawtherapee/labimage.cc \
     core/rotateImage.cpp \
     core/scale.cpp \
     core/timeDiff.cpp \
@@ -77,6 +90,7 @@ win32:LIBS += -L/usr/lib
 unix {
 script.extra = move_script; install -m 755 -p filmulator
 extra.path = /usr/bin
+# INCLUDEPATH += ../eigen
 LIBS += -L/usr/local/lib
 }
 
@@ -96,6 +110,20 @@ HEADERS += \
     core/interface.h \
     core/lut.hpp \
     core/matrix.hpp \
+    core/myLibraw.h \
+    core/nlmeans/nlmeans.hpp \
+    core/rawtherapee/boxblur.h \
+    core/rawtherapee/cplx_wavelet_dec.h \
+    core/rawtherapee/cplx_wavelet_filter_coeffs.h \
+    core/rawtherapee/cplx_wavelet_level.h \
+    core/rawtherapee/gauss.h \
+    core/rawtherapee/helpersse2.h \
+    core/rawtherapee/labimage.h \
+    core/rawtherapee/opthelper.h \
+    core/rawtherapee/rt_math.h \
+    core/rawtherapee/rt_routines.h \
+    core/rawtherapee/sleef.h \
+    core/rawtherapee/sleefsseavx.h \
     database/backgroundQueue.h \
     database/basicSqlModel.h \
     database/cJSON.h \
@@ -119,16 +147,15 @@ HEADERS += \
     database/database.hpp
 
 
-QMAKE_CXXFLAGS += -std=c++14 -DTOUT -O3 -fprefetch-loop-arrays -fno-strict-aliasing -ffast-math -DLF_GIT
+QMAKE_CXXFLAGS += -std=c++17 -DTOUT -O3 -fopenmp -fprefetch-loop-arrays -fno-strict-aliasing -ffast-math
 macx: {
-QMAKE_CXXFLAGS += -Xpreprocessor -fopenmp -lomp -I/opt/local/include
+QMAKE_CXXFLAGS += -Xpreprocessor -lomp -I/opt/local/include
 }
 unix:!macx {
-QMAKE_CXXFLAGS += -fopenmp
 }
 
 #QMAKE_CFLAGS_DEBUG += -DTOUT -O3 -fprefetch-loop-arrays -fopenmp
-QMAKE_LFLAGS += -std=c++14 -O3
+QMAKE_LFLAGS += -std=c++17 -O3
 macx: {
 QMAKE_LFLAGS += -lomp
 }
@@ -136,7 +163,7 @@ unix:!macx {
 QMAKE_LFLAGS += -fopenmp
 }
 
-LIBS += -ltiff -lexiv2 -ljpeg -lraw_r -lrtprocess -llensfun -lcurl -larchive
+LIBS += -ltiff -lexiv2 -ljpeg -lraw_r -lrtprocess -llensfun -lcurl -larchive -lz
 macx: {
 LIBS += -L /opt/local/lib /opt/local/lib/libomp.dylib
 }

@@ -22,7 +22,7 @@ script:
     #build libraw
   - git clone https://github.com/LibRaw/LibRaw.git
   - cd LibRaw
-  - git checkout 0209b6a2caec189e6d1a9b21c10e9e49f46e5a92 #0.20.2
+  - git checkout 1325536d51e5123909d20f0ae8656152b6e117ee #2022-01-31
   - git apply ../patches/libraw-makefile.patch
   - make -j3 -f Makefile.dist
   - sudo make install -f Makefile.dist
@@ -47,7 +47,7 @@ script:
   - sudo make install
   - cd ../..
     #build filmulator
-  - cd filmulator-gui
+    #- cd filmulator-gui
     #- qmake PREFIX=/usr
   - mkdir build
   - cd build
@@ -60,11 +60,11 @@ script:
   - mkdir -p appdir/usr/qml ; mv appdir/share/Filmulator/qml/filmulator-gui/* appdir/usr/qml/
   - rm -rf appdir/bin/
   - rm -rf appdir/share/
-  - mkdir -p appdir/usr/share/applications/ ; cp ../filmulator-gui.desktop.in appdir/usr/share/applications/filmulator-gui.desktop
+  - mkdir -p appdir/usr/share/applications/ ; cp ../filmulator-gui/filmulator-gui.desktop.in appdir/usr/share/applications/filmulator-gui.desktop
   - sed -i -e 's|^Exec=.*|Exec=filmulator-gui|g' appdir/usr/share/applications/filmulator-gui.desktop
   - mkdir -p appdir/usr/share/icons/hicolor/64x64/apps/
-  - cp ../filmulator-gui64.png appdir/usr/share/icons/hicolor/64x64/apps/filmulator-gui.png
-  - cp ../filmulator-gui64.png appdir/filmulator-gui64.png
+  - cp ../filmulator-gui/filmulator-gui64.png appdir/usr/share/icons/hicolor/64x64/apps/filmulator-gui.png
+  - cp ../filmulator-gui/filmulator-gui64.png appdir/filmulator-gui64.png
   - find appdir/
   - wget -c "https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage" 
   - chmod a+x linuxdeployqt*.AppImage

@@ -1,4 +1,4 @@
-/* 
+/*
  * This file is part of Filmulator.
  *
  * Copyright 2013 Omer Mano and Carlo Vaccari
@@ -19,9 +19,8 @@
 #include "imagePipeline.h"
 #include <algorithm>
 #include <stdio.h>
-#include <unistd.h>
 
-//Function-------------------------------------------------------------------------
+// Function-------------------------------------------------------------------------
 bool ImagePipeline::filmulate(matrix<float> &input_image,
                               matrix<float> &output_density,
                               ParameterManager * paramManager,
@@ -55,12 +54,13 @@ bool ImagePipeline::filmulate(matrix<float> &input_image,
     float layer_time_divisor = filmParam.layerTimeDivisor;
     float rolloff_boundary = filmParam.rolloffBoundary;
     float toe_boundary = filmParam.toeBoundary;
+    float highlight_crosstalk = filmParam.highlightCrosstalk;
 
     //Set up timers
-    struct timeval initialize_start, development_start, develop_start,
+    std::chrono::steady_clock::time_point initialize_start, development_start, develop_start,
                    diffuse_start, agitate_start, layer_mix_start;
     double develop_dif = 0, diffuse_dif = 0, agitate_dif = 0, layer_mix_dif= 0;           
-    gettimeofday(&initialize_start,NULL);
+    initialize_start = std::chrono::steady_clock::now();
 
     int nrows = (int) input_image.nr();
     int ncols = (int) input_image.nc()/3;
@@ -69,7 +69,11 @@ bool ImagePipeline::filmulate(matrix<float> &input_image,
     //Now we activate some of the crystals on the film. This is literally
     //akin to exposing film to light.
     matrix<float> active_crystals_per_pixel = input_image;
-    exposure(active_crystals_per_pixel, crystals_per_pixel, rolloff_boundary, toe_boundary);
+    exposure(active_crystals_per_pixel,
+             crystals_per_pixel,
+             rolloff_boundary,
+             toe_boundary,
+             highlight_crosstalk);
     //We set the crystal radius to a small seed value for each color.
     matrix<float>& crystal_radius = output_density;
     crystal_radius.set_size(nrows,ncols*3);
@@ -111,7 +115,7 @@ bool ImagePipeline::filmulate(matrix<float> &input_image,
    
     tout << "Initialization time: " << timeDiff(initialize_start)
          << " seconds" << endl;
-    gettimeofday(&development_start,NULL);
+    development_start = std::chrono::steady_clock::now();
 
     //Now we begin the main development/diffusion loop, which approximates the
     //differential equation of film development.
@@ -127,7 +131,7 @@ bool ImagePipeline::filmulate(matrix<float> &input_image,
         //Updating for starting the development simulation. Valid is one too high here.
         pipeline->updateProgress(Valid::partfilmulation, float(i)/float(development_steps));
 
-        gettimeofday(&develop_start,NULL);
+        develop_start = std::chrono::steady_clock::now();
 
         //This is where we perform the chemical reaction part.
         //The crystals grow.
@@ -143,7 +147,7 @@ bool ImagePipeline::filmulate(matrix<float> &input_image,
                 silver_salt_consumption_const,timestep);
         
         develop_dif += timeDiff(develop_start);
-        gettimeofday(&diffuse_start,NULL);
+        diffuse_start = std::chrono::steady_clock::now();
 
         //Check for cancellation
         abort = paramManager->claimFilmAbort();
@@ -173,7 +177,7 @@ bool ImagePipeline::filmulate(matrix<float> &input_image,
 
         diffuse_dif += timeDiff(diffuse_start);
 
-        gettimeofday(&layer_mix_start,NULL);        
+        layer_mix_start = std::chrono::steady_clock::now();
         //This performs mixing between the active layer adjacent to the film
         // and the reservoir.
         //This keeps the effects from getting too crazy.
@@ -188,7 +192,7 @@ bool ImagePipeline::filmulate(matrix<float> &input_image,
         
         layer_mix_dif += timeDiff(layer_mix_start);
         
-        gettimeofday(&agitate_start,NULL);
+        agitate_start = std::chrono::steady_clock::now();
         
         //I want agitation to only occur in the middle of development, not
         //at the very beginning or the ends. So, I add half the agitate
@@ -200,38 +204,39 @@ bool ImagePipeline::filmulate(matrix<float> &input_image,
        
         agitate_dif += timeDiff(agitate_start);
     }
-    tout << "Development time: " <<timeDiff(development_start)<< " seconds" << endl;
-    tout << "Develop time: " << develop_dif << " seconds" << endl;
-    tout << "Diffuse time: " << diffuse_dif << " seconds" << endl;
-    tout << "Layer mix time: " << layer_mix_dif << " seconds" << endl;
-    tout << "Agitate time: " << agitate_dif << " seconds" << endl;
-    
-    //Now we compute the density (opacity) of the film.
-    //We assume that overlapping crystals or dye clouds are
-    //nonexistent. It works okay, for now...
-    //The output is crystal_radius^2 * active_crystals_per_pixel
-    struct timeval mult_start;
-    gettimeofday(&mult_start,NULL);
 
-    abort = paramManager->claimFilmAbort();
-    if(abort == AbortStatus::restart)
-    {
-        return true;
+  tout << "Development time: " << timeDiff(development_start) << " seconds"
+       << endl;
+  tout << "Develop time: " << develop_dif << " seconds" << endl;
+  tout << "Diffuse time: " << diffuse_dif << " seconds" << endl;
+  tout << "Layer mix time: " << layer_mix_dif << " seconds" << endl;
+  tout << "Agitate time: " << agitate_dif << " seconds" << endl;
+
+  // Now we compute the density (opacity) of the film.
+  // We assume that overlapping crystals or dye clouds are
+  // nonexistent. It works okay, for now...
+  // The output is crystal_radius^2 * active_crystals_per_pixel
+  std::chrono::steady_clock::time_point mult_start;
+  mult_start = std::chrono::steady_clock::now();
+
+  abort = paramManager->claimFilmAbort();
+  if (abort == AbortStatus::restart) {
+    return true;
+  }
+
+  const int numRows = crystal_radius.nr();
+  const int numCols = crystal_radius.nc();
+
+#pragma omp parallel for
+  for (int i = 0; i < numRows; ++i) {
+    for (int j = 0; j < numCols; ++j) {
+      output_density(i, j) = crystal_radius(i, j) * crystal_radius(i, j) *
+                             active_crystals_per_pixel(i, j);
     }
-
-    const int numRows = crystal_radius.nr();
-    const int numCols = crystal_radius.nc();
-
-    #pragma omp parallel for
-    for (int i = 0; i < numRows; ++i) {
-        for (int j = 0; j < numCols; ++j) {
-            output_density(i, j) = crystal_radius(i, j) * crystal_radius(i, j) * active_crystals_per_pixel(i, j);
-        }
-    }
-    tout << "Output density time: "<<timeDiff(mult_start) << endl;
+  }
+  tout << "Output density time: " << timeDiff(mult_start) << endl;
 #ifdef DOUT
-    debug_out.close();
+  debug_out.close();
 #endif
-    return false;
+  return false;
 }
-

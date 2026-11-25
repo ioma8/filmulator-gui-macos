@@ -9,3 +9,7 @@ deps/
 *.dylib
 .DS_Store
 errors.txt
+.cache/
+
+# vcpkg
+vcpkg_installed/
