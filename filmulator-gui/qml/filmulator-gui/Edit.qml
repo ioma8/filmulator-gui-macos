@@ -30,6 +30,8 @@ SlimSplitView {
 
     property bool onEditTab
 
+    property bool helpMode: false
+
     onRequestingCroppingChanged: {
         if (requestingCropping == true) {
             if (paramManager.cropHeight <= 0) {//No crop in the database
@@ -46,25 +48,57 @@ SlimSplitView {
                 imageRect.cropAspect = paramManager.cropAspect
                 imageRect.cropVoffset = paramManager.cropVoffset
                 imageRect.cropHoffset = paramManager.cropHoffset
-                paramManager.cropHeight = 0 //signal to image pipeline to disable cropping
+                if (paramManager.cropHeight != 0) {
+                    paramManager.cropHeight = 0 //signal to image pipeline to disable cropping
+                }
             }
         } else {//we're done cropping
             if (!cancelCropping) {//accepted the crop
+                var noChange = true
                 if (imageRect.noCrop) {
                     //if the crop is the full image, we want to set it to 0
                     //if we don't, if you rotate the image 90 degrees it keeps the aspect ratio
-                    paramManager.cropHeight = 0
-                    paramManager.cropAspect = 0
-                    paramManager.cropVoffset = 0
-                    paramManager.cropHoffset = 0
+                    /* not gonna happen because it's always set to zero when cropping
+                    if (paramManager.cropHeight != 0) {
+                        paramManager.cropHeight = 0
+                        noChange = false
+                    }*/
+                    if (paramManager.cropAspect != 0) {
+                        paramManager.cropAspect = 0
+                        noChange = false
+                    }
+                    if (paramManager.cropVoffset != 0) {
+                        paramManager.cropVoffset = 0
+                        noChange = false
+                    }
+                    if (paramManager.cropHoffset != 0) {
+                        paramManager.cropHoffset = 0
+                        noChange = false
+                    }
                 } else {//the crop isn't the entire image
-                    paramManager.cropHeight = imageRect.readHeight
-                    paramManager.cropAspect = imageRect.readAspect
-                    paramManager.cropVoffset = imageRect.readVoffset
-                    paramManager.cropHoffset = imageRect.readHoffset
+                    if (paramManager.cropHeight != imageRect.readHeight) {
+                        paramManager.cropHeight = imageRect.readHeight
+                        noChange = false
+                    }
+                    if (paramManager.cropAspect != imageRect.readAspect) {
+                        paramManager.cropAspect = imageRect.readAspect
+                        noChange = false
+                    }
+                    if (paramManager.cropVoffset != imageRect.readVoffset) {
+                        paramManager.cropVoffset = imageRect.readVoffset
+                        noChange = false
+                    }
+                    if (paramManager.cropHoffset != imageRect.readHoffset) {
+                        paramManager.cropHoffset = imageRect.readHoffset
+                        noChange = false
+                    }
                 }
                 //send stuff back to database
-                paramManager.writeback()
+                if (noChange) {
+                    cropping = false
+                } else {
+                    paramManager.writeback()
+                }
             } else { //canceling crop, so no writeback
                 cancelCropping = false
             }
@@ -73,7 +107,12 @@ SlimSplitView {
 
     onCroppingChanged: {
         if (flicky.fit) {
-            bottomImage.scale = flicky.fitScale
+            if (cropping) {
+                bottomImage.scale = flicky.fitScale * 0.8
+                flicky.fit = false
+            } else {
+                bottomImage.scale = flicky.fitScale
+            }
         }
         flicky.returnToBounds()
         flicky.contentX = flicky.contentX + 2*Math.floor(cropMargin*uiScale*cropping) - Math.floor(cropMargin*uiScale)
@@ -119,15 +158,38 @@ SlimSplitView {
                 paramManager.rotationAngle = -50
                 //when the image is ready, then cropping will be set to true by topImage
             }
+
+            //disable cropping while we rotate
             root.tempCropHeight = paramManager.cropHeight
-            paramManager.cropHeight = 0
+            if (paramManager.cropHeight == 0) {
+                //do nothing
+            } else {
+                paramManager.cropHeight = 0
+            }
         } else {//we're done leveling
             if (!cancelLeveling) {//accepted the leveling
-                paramManager.rotationPointX = imageRect.readRotationPointX
-                paramManager.rotationPointY = imageRect.readRotationPointY
-                paramManager.rotationAngle = imageRect.rotationAngle
-                paramManager.cropHeight = root.tempCropHeight
-                paramManager.writeback()
+                var noChange = true
+                if (paramManager.rotationPointX != imageRect.readRotationPointX) {
+                    paramManager.rotationPointX = imageRect.readRotationPointX
+                    noChange = false
+                }
+                if (paramManager.rotationPointY != imageRect.readRotationPointY) {
+                    paramManager.rotationPointY = imageRect.readRotationPointY
+                    noChange = false
+                }
+                if (paramManager.rotationAngle != imageRect.rotationAngle) {
+                    paramManager.rotationAngle = imageRect.rotationAngle
+                    noChange = false
+                }
+                if (paramManager.cropHeight != root.tempCropHeight) {
+                    paramManager.cropHeight = root.tempCropHeight
+                    noChange = false
+                }
+                if (noChange) {
+                    leveling = false
+                } else {
+                    paramManager.writeback()
+                }
             } else {
                 cancelLeveling = false
             }
@@ -179,7 +241,7 @@ SlimSplitView {
                     color: "white"
                     font.pixelSize: 14.0 * uiScale
                     wrapMode: Text.Wrap
-                    text: qsTr("Select an image to edit by double-clicking on a photo in the Work Queue. Switch between images with the right and left arrow keys.\n\nRate the current image by pressing 0 through 5 and X, or by pressing up or down arrow keys.")
+                    text: qsTr("Select an image to edit by double-clicking on a photo in the Work Queue. Switch between images with the right and left arrow keys.\n\nRate the current image by pressing 0 through 5 and X, or by pressing up or down arrow keys.\n\nWhen an image is loaded, you can zoom in or out by scrolling up or down, and you can pan around by clicking and dragging with the mouse.")
                 }
             }
         }
@@ -272,11 +334,11 @@ SlimSplitView {
                                 //now actually ask for the image
                                 if (settings.getQuickPreview()) {//load the quick pipe
                                     topImage.state = "lq"//loading quick pipe
-                                    topImage.source = "image://filmy/q" + topImage.indexString
+                                    topImage.source = "image://filmy/q" + paramManager.imageIndex + topImage.indexString
                                 }
                                 else {//load the full size image
                                     topImage.state = "lf"// loading full image
-                                    topImage.source = "image://filmy/f" + topImage.indexString
+                                    topImage.source = "image://filmy/f" + paramManager.imageIndex + topImage.indexString
                                 }
                             }
                         }
@@ -324,18 +386,18 @@ SlimSplitView {
                                 s = num+"";
                                 size = 6 //6 digit number
                                 while (s.length < size) {s = "0" + s}
-                                topImage.indexString = paramManager.imageIndex + s
+                                topImage.indexString = s
 
                                 //now actually ask for the image
                                 if (topImage.state == "lt") {//it was loading the thumbnail
                                     topImage.state = "lq"//loading quick pipe
                                     root.previewReady = false
-                                    topImage.source = "image://filmy/q" + topImage.indexString
+                                    topImage.source = "image://filmy/q" + paramManager.imageIndex + topImage.indexString
                                 }
                                 else if (topImage.state == "lq") {//it was loading the quick image
                                     topImage.state = "lf"//loading full image
                                     root.previewReady = true
-                                    topImage.source = "image://filmy/f" + topImage.indexString
+                                    topImage.source = "image://filmy/f" + paramManager.imageIndex + topImage.indexString
                                 }
                             }
 
@@ -374,7 +436,7 @@ SlimSplitView {
                             //now actually ask for the image
                             //we always go back to loading quick even when the full image fails
                             topImage.state = "lq"//loading quick pipe
-                            topImage.source = "image://filmy/q" + topImage.indexString
+                            topImage.source = "image://filmy/q" + paramManager.imageIndex + topImage.indexString //========================= cancelloop
                         }
                         console.log("topImage state became: " + topImage.state)
                     }
@@ -1004,7 +1066,7 @@ SlimSplitView {
                                 // Add the offset (in pixels) to get to the middle of the image.
                                 // Add half of the width of the crop itself.
                                 //And then we round.
-                                var clippedWidth = Math.round(Math.min(Math.max(imageRect.minCrop,unclippedWidth),bottomImage.width*(0.5+oldOffset)+0.5*oldWidth))
+                                var clippedWidth = Math.round(Math.min(Math.max(imageRect.minCrop,unclippedWidth), bottomImage.width*(0.5+oldOffset)+0.5*oldWidth, bottomImage.width))
                                 imageRect.cropAspect = clippedWidth/(bottomImage.height*imageRect.cropHeight)
                                 //Now we want to remember where the right edge of the image was, and preserve that.
                                 imageRect.cropHoffset = oldOffset + 0.5*(oldWidth-clippedWidth)/bottomImage.width
@@ -1078,7 +1140,7 @@ SlimSplitView {
                             oldX = mouse.x
                             if (!(mouse.modifiers & Qt.ControlModifier)) {//no modifiers; resize as usual
                                 unclippedWidth = unclippedWidth + deltaX
-                                var clippedWidth = Math.round(Math.min(Math.max(imageRect.minCrop,unclippedWidth),bottomImage.width*(0.5-oldOffset)+0.5*oldWidth))
+                                var clippedWidth = Math.round(Math.min(Math.max(imageRect.minCrop,unclippedWidth), bottomImage.width*(0.5-oldOffset)+0.5*oldWidth, bottomImage.width))
                                 imageRect.cropAspect = clippedWidth/(bottomImage.height*imageRect.cropHeight)
                                 //Now we want to remember where the left edge of the image was, and preserve that.
                                 imageRect.cropHoffset = oldOffset - 0.5*(oldWidth-clippedWidth)/bottomImage.width
@@ -1152,7 +1214,7 @@ SlimSplitView {
                             oldY = mouse.y
                             if (!(mouse.modifiers & Qt.ControlModifier)) {//no modifiers; resize as usual
                                 unclippedHeight = unclippedHeight - deltaY
-                                var clippedHeight = Math.round(Math.min(Math.max(imageRect.minCrop, unclippedHeight), bottomImage.height*(0.5+oldOffset)+0.5*oldHeight))
+                                var clippedHeight = Math.round(Math.min(Math.max(imageRect.minCrop, unclippedHeight), bottomImage.height*(0.5+oldOffset)+0.5*oldHeight, bottomImage.height))
                                 imageRect.cropAspect = cropDrag.width/clippedHeight
                                 imageRect.cropHeight = clippedHeight/bottomImage.height
                                 //Remember where the bottom edge is.
@@ -1227,7 +1289,7 @@ SlimSplitView {
                             oldY = mouse.y
                             if (!(mouse.modifiers & Qt.ControlModifier)) {//no modifiers; resize as usual
                                 unclippedHeight = unclippedHeight + deltaY
-                                var clippedHeight = Math.round(Math.min(Math.max(imageRect.minCrop, unclippedHeight), bottomImage.height*(0.5-oldOffset)+0.5*oldHeight))
+                                var clippedHeight = Math.round(Math.min(Math.max(imageRect.minCrop, unclippedHeight), bottomImage.height*(0.5-oldOffset)+0.5*oldHeight, bottomImage.height))
                                 imageRect.cropAspect = cropDrag.width/clippedHeight
                                 imageRect.cropHeight = clippedHeight/bottomImage.height
                                 //Remember where the bottom edge is.
@@ -1869,10 +1931,12 @@ SlimSplitView {
                                     var newAngle = Math.atan2(mouse.y-imageRect.displayRotationPointY, mouse.x-imageRect.displayRotationPointX)*180/Math.PI
                                     var delta = newAngle - oldAngle
                                     imageRect.rotationAngle += delta
-                                    if (imageRect.rotationAngle > 45) { //more than 45 degrees either way
-                                        imageRect.rotationAngle -= 90
-                                    } else if (imageRect.rotationAngle < -45) {
-                                        imageRect.rotationAngle += 90
+                                    while ((imageRect.rotationAngle < -45) || (imageRect.rotationAngle >= 45)) {
+                                        if (imageRect.rotationAngle > 45) { //more than 45 degrees either way
+                                            imageRect.rotationAngle -= 90
+                                        } else if (imageRect.rotationAngle < -45) {
+                                            imageRect.rotationAngle += 90
+                                        }
                                     }
 
                                     oldAngle = newAngle
@@ -2191,6 +2255,7 @@ SlimSplitView {
                 id: fileInfoTooltip
                 anchors.fill: parent
                 tooltipText: paramManager.fullFilenameQstr
+                instant: root.helpMode
                 Component.onCompleted: {
                     fileInfoTooltip.tooltipWanted.connect(root.tooltipWanted)
                 }
@@ -2330,6 +2395,7 @@ SlimSplitView {
                     onActivated: lensfunBox.active = false
                 }
 
+                tooltipInstant: root.helpMode
                 Component.onCompleted: {
                     lensFunMenuButton.tooltipWanted.connect(root.tooltipWanted)
                 }
@@ -2421,11 +2487,27 @@ SlimSplitView {
                     paramManager.resetLensfunName()
                     paramManager.writeback()
                 }
+                tooltipInstant: root.helpMode
                 Component.onCompleted: {
                     lensFunResetButton.tooltipWanted.connect(root.tooltipWanted)
                 }
                 uiScale: root.uiScale
             }
+            Text {
+                id: noLensText
+                x: 103 * uiScale
+                y: 33 * uiScale
+                width: parent.width - 206*uiScale
+                height: parent.height - 66*uiScale
+                visible: lensfunBox.active && (lensListBox.count < 1) && (lensFilterBox.text != "")
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                color: "white"
+                font.pixelSize: 14.0 * uiScale
+                wrapMode: Text.Wrap
+                text: qsTr("There are no lenses matching the current search.\n\nYou may need to download updated lens corrections in the Settings tab.")
+            }
+
             ListView {
                 id: lensListBox
                 x: 3 * uiScale
@@ -2665,6 +2747,7 @@ SlimSplitView {
                     //store exif camera, exif lens name, and lensfun lens name in database, plus preferred corrections
                     paramManager.setLensPreferences()
                 }
+                tooltipInstant: root.helpMode
                 Component.onCompleted: {
                     savePreferredLens.tooltipWanted.connect(root.tooltipWanted)
                 }
@@ -2682,6 +2765,7 @@ SlimSplitView {
                     //clear exif camera, exif lens name, and lensfun lens name in database
                     paramManager.eraseLensPreferences()
                 }
+                tooltipInstant: root.helpMode
                 Component.onCompleted: {
                     forgetPreferredLens.tooltipWanted.connect(root.tooltipWanted)
                 }
@@ -2701,6 +2785,7 @@ SlimSplitView {
             anchors.right: wbButton.left
             y: 0 * uiScale
             tooltipText: qsTr("Change the editor's background brightness between black, gray, and white.\n\nShortcut: B")
+            enabled: !lensfunBox.active
             Image {
                 width: 14 * uiScale
                 height: 14 * uiScale
@@ -2733,6 +2818,7 @@ SlimSplitView {
                 }
             }
 
+            tooltipInstant: root.helpMode
             Component.onCompleted: {
                 backgroundBrightness.tooltipWanted.connect(root.tooltipWanted)
             }
@@ -2743,8 +2829,9 @@ SlimSplitView {
             id: wbButton
             anchors.right: crop.left
             y: 0 * uiScale
-            notDisabled: root.imageReady && !root.cropping && !root.leveling
-            tooltipText: root.wbPicking ? qsTr("Cancel setting custom white balance. Shortcut: W") : qsTr("Set a custom white balance based on where you click in the image.\n\nThe white balance will be remembered and can be applied to other images taken by the same camera model.\n\nShortcut: W")
+            notDisabled: root.imageReady && !root.cropping && !root.leveling && paramManager.colorAvail
+            tooltipText: root.wbPicking ? qsTr("Cancel setting custom white balance. Shortcut: W") : paramManager.colorAvail ? qsTr("Set a custom white balance based on where you click in the image.\n\nShortcut: W") : qsTr("White balance picker not available for monochrome raw images.")
+            enabled: !lensfunBox.active
             Image {
                 width: 14 * uiScale
                 height: 14 * uiScale
@@ -2776,6 +2863,7 @@ SlimSplitView {
                 }
             }
 
+            tooltipInstant: root.helpMode
             Component.onCompleted: {
                 wbButton.tooltipWanted.connect(root.tooltipWanted)
             }
@@ -2788,6 +2876,7 @@ SlimSplitView {
             y: 0 * uiScale
             notDisabled: root.imageReady && !root.wbPicking && !root.leveling
             tooltipText: (root.cropping ? qsTr("Click this to save your crop."): qsTr("Click this to begin cropping.")) + "\n\n" + qsTr("Hold Ctrl when dragging a corner to lock aspect ratio. Hold Ctrl while dragging an edge or the remaining image to move the crop without changing its size.\n\nHold Shift while dragging a corner to snap the crop to the nearest common aspect ratio. Hold Shift while moving the crop to snap it to horizontal and or vertical center.\n\nShortcut: C")
+            enabled: !lensfunBox.active
             Image {
                 width: 14 * uiScale
                 height: 14 * uiScale
@@ -2822,6 +2911,7 @@ SlimSplitView {
                 }
             }
 
+            tooltipInstant: root.helpMode
             Component.onCompleted: {
                 crop.tooltipWanted.connect(root.tooltipWanted)
             }
@@ -2834,6 +2924,7 @@ SlimSplitView {
             y: 0 * uiScale
             notDisabled: root.imageReady && !root.wbPicking && !root.cropping && !root.leveling
             tooltipText: qsTr("Rotate image 90 degrees left.")
+            enabled: !lensfunBox.active
             Image {
                 width: 14 * uiScale
                 height: 14 * uiScale
@@ -2845,6 +2936,7 @@ SlimSplitView {
             onTriggered: {
                 paramManager.rotateLeft()
             }
+            tooltipInstant: root.helpMode
             Component.onCompleted: {
                 rotateLeft.tooltipWanted.connect(root.tooltipWanted)
             }
@@ -2857,6 +2949,7 @@ SlimSplitView {
             y: 0 * uiScale
             notDisabled: root.previewReady && !root.wbPicking && !root.cropping
             tooltipText: (root.leveling ? qsTr("Click this to apply the rotation.") : qsTr("Click this to begin leveling the image.")) + "\n\n" + qsTr("Click to place the rotation guide on the image, then drag the guide lines to align them with whatever you want to be vertical or horizontal. You can reposition the rotation guide by dragging where the guide lines meet.\n\nReset the rotation to zero by pressing \"Shift+L\" or double right clicking.\n\nShortcut: L")
+            enabled: !lensfunBox.active
             Image {
                 width: 14 * uiScale
                 height: 14 * uiScale
@@ -2898,6 +2991,7 @@ SlimSplitView {
                 }
             }
 
+            tooltipInstant: root.helpMode
             Component.onCompleted: {
                 level.tooltipWanted.connect(root.tooltipWanted)
             }
@@ -2910,6 +3004,7 @@ SlimSplitView {
             y: 0 * uiScale
             notDisabled: root.imageReady && !root.wbPicking && !root.cropping && !root.leveling
             tooltipText: qsTr("Rotate image 90 degrees right.")
+            enabled: !lensfunBox.active
             Image {
                 width: 14 * uiScale
                 height: 14 * uiScale
@@ -2922,6 +3017,7 @@ SlimSplitView {
             onTriggered: {
                 paramManager.rotateRight()
             }
+            tooltipInstant: root.helpMode
             Component.onCompleted: {
                 rotateRight.tooltipWanted.connect(root.tooltipWanted)
             }
@@ -2955,6 +3051,7 @@ SlimSplitView {
         cropping: root.requestingCropping || root.cropping
         leveling: root.requestingLeveling || root.leveling
         onEditTab: root.onEditTab
+        helpMode: root.helpMode
         Component.onCompleted: {
             editTools.tooltipWanted.connect(root.tooltipWanted)
         }

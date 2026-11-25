@@ -37,6 +37,7 @@ DEPENDENCIES=(
     "libjpeg-turbo"
     "libtiff"
     "curl"
+    "glib"
     "pkg-config"
 )
 
@@ -81,15 +82,18 @@ if ! cmake --find-package -DNAME=rtprocess -DCOMPILER_ID=AppleClang -DLANGUAGE=C
     cd "$PROJECT_ROOT"
 fi
 
-# Build Filmulator
-cd filmulator-gui
+# Build Filmulator.
+# Upstream moved CMakeLists.txt to the repository root and installs the
+# macOS bundle under ${CMAKE_SOURCE_DIR}/build, so configure that root
+# list into ./build rather than the old filmulator-gui/ directory.
+cd "$PROJECT_ROOT"
 rm -rf build
 mkdir -p build
 cd build
 
 echo "Configuring with CMake..."
 # On macOS with AppleClang, FindOpenMP often needs help.
-cmake ../ \
+cmake "$PROJECT_ROOT" \
     -DCMAKE_BUILD_TYPE="RELEASE" \
     -DCMAKE_PREFIX_PATH="$QT_PATH;$DEPS_INSTALL_DIR;$LIBARCHIVE_PATH;$HOMEBREW_PREFIX" \
     -DOpenMP_CXX_FLAGS="-Xpreprocessor;-fopenmp;-I$LIBOMP_PATH/include" \
@@ -114,7 +118,7 @@ fi
 
 # Run macdeployqt to bundle Qt dependencies
 echo "Running macdeployqt..."
-$QT_PATH/bin/macdeployqt Filmulator.app -qmldir=../qml -verbose=2 -executable="$EXE_PATH"
+$QT_PATH/bin/macdeployqt Filmulator.app -qmldir="$PROJECT_ROOT/filmulator-gui/qml" -verbose=2 -executable="$EXE_PATH"
 
 # Manual fixup for non-Qt libraries
 echo "Manually fixing non-Qt library references..."
@@ -197,5 +201,5 @@ codesign --force --deep --sign - "$APP_DIR"
 echo "Creating zip archive..."
 zip -r Filmulator-macOS-arm64.zip Filmulator.app
 
-echo "Build complete! Binary at filmulator-gui/build/Filmulator-macOS-arm64.zip"
+echo "Build complete! Binary at build/Filmulator-macOS-arm64.zip"
 cd "$PROJECT_ROOT"

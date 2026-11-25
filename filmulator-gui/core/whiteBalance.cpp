@@ -23,16 +23,16 @@ void temp_to_XYZ(float const temp, float &X, float &Y, float &Z)
 
     if(temp < 4000)
     {
-        temp_x = -0.2661239f * pow(10.0f,9.0f) * pow(temp,-3.0f) +
-                 -0.2343589f * pow(10.0f,6.0f) * pow(temp,-2.0f) +
-                  0.8776956f * pow(10.0f,3.0f) * pow(temp,-1.0f) +
+        temp_x = -0.2661239e9 * pow(temp,-3.0f) +
+                 -0.2343589e6 * pow(temp,-2.0f) +
+                  0.8776956e3 * pow(temp,-1.0f) +
                   0.179910f;
     }
     else
     {
-        temp_x = -3.0258469f * pow(10.0f,9.0f) * pow(temp,-3.0f) +
-                  2.1070379f * pow(10.0f,6.0f) * pow(temp,-2.0f) +
-                  0.2226347f * pow(10.0f,3.0f) * pow(temp,-1.0f) +
+        temp_x = -3.0258469e9 * pow(temp,-3.0f) +
+                  2.1070379e6 * pow(temp,-2.0f) +
+                  0.2226347e3 * pow(temp,-1.0f) +
                   0.24039f;
     }
 
@@ -71,9 +71,9 @@ void temp_to_XYZ(float const temp, float &X, float &Y, float &Z)
 }
 
 //Right-multiplies the 3x3 matrix mat by column vector [r g b]'
-void matrixVectorMult(float r,  float g,  float b,
+void matrixVectorMult(const float r, const float g, const float b,
                       float &x, float &y, float &z,
-                      float mat[3][3])
+                      const float mat[3][3])
 {
     x = mat[0][0]*r + mat[0][1]*g + mat[0][2]*b;
     y = mat[1][0]*r + mat[1][1]*g + mat[1][2]*b;
@@ -81,26 +81,7 @@ void matrixVectorMult(float r,  float g,  float b,
 }
 
 //Self-explanatory.
-void inverse(float in[3][3], float (&out)[3][3])
-{
-    float det = in[0][0] * (in[1][1]*in[2][2] - in[2][1]*in[1][2]) -
-                 in[0][1] * (in[1][0]*in[2][2] - in[1][2]*in[2][0]) +
-                 in[0][2] * (in[1][0]*in[2][1] - in[1][1]*in[2][0]);
-    float invdet = 1 / det;
-
-    out[0][0] = (in[1][1]*in[2][2] - in[2][1]*in[1][2]) * invdet;
-    out[0][1] = (in[0][2]*in[2][1] - in[0][1]*in[2][2]) * invdet;
-    out[0][2] = (in[0][1]*in[1][2] - in[0][2]*in[1][1]) * invdet;
-    out[1][0] = (in[1][2]*in[2][0] - in[1][0]*in[2][2]) * invdet;
-    out[1][1] = (in[0][0]*in[2][2] - in[0][2]*in[2][0]) * invdet;
-    out[1][2] = (in[1][0]*in[0][2] - in[0][0]*in[1][2]) * invdet;
-    out[2][0] = (in[1][0]*in[2][1] - in[2][0]*in[1][1]) * invdet;
-    out[2][1] = (in[2][0]*in[0][1] - in[0][0]*in[2][1]) * invdet;
-    out[2][2] = (in[0][0]*in[1][1] - in[1][0]*in[0][1]) * invdet;
-}
-
-//Self-explanatory.
-void matrixMatrixMult(float left[3][3], float right[3][3], float (&output)[3][3])
+void matrixMatrixMult(const float left[3][3], const float right[3][3], float (&output)[3][3])
 {
     for (int i = 0; i < 3; i++)
     {
@@ -113,6 +94,68 @@ void matrixMatrixMult(float left[3][3], float right[3][3], float (&output)[3][3]
             }
         }
     }
+}
+
+constexpr float srgb2xyz[3][3] = {
+    {0.4124564, 0.3575761, 0.1804375},
+    {0.2126729, 0.7151522, 0.0721750},
+    {0.0193339, 0.1191920, 0.9503041}
+};
+
+//Computes the raw color space multipliers.
+void whiteBalancePreMults(const float temperature, const float tint, const float cam_xyz[3][3],
+                          float &rMult, float &gMult, float &bMult)
+{
+    //Temperature part
+    float XIllum, YIllum, ZIllum;
+    temp_to_XYZ(temperature, XIllum, YIllum, ZIllum);
+    float rawRtemp, rawGtemp, rawBtemp;
+    matrixVectorMult(XIllum, YIllum, ZIllum, rawRtemp, rawGtemp, rawBtemp, cam_xyz);
+
+    //Tint part
+    float srgb2raw[3][3];
+    matrixMatrixMult(cam_xyz, srgb2xyz, srgb2raw);
+    float rawRtint, rawGtint, rawBtint;
+    float origRtint, origGtint, origBtint;
+    //version 1: just convert 1:tint:1 from sRGB to raw color, and divide by 1:1:1 from sRGB to raw color
+    /*
+    matrixVectorMult(1, tint, 1, rawRtint, rawGtint, rawBtint, srgb2raw);
+    matrixVectorMult(1, 1, 1, origRtint, origGtint, origBtint, srgb2raw);
+    rawRtint /= origRtint;
+    rawGtint /= origGtint;
+    rawBtint /= origBtint;
+    */
+
+    rawRtemp = 1/rawRtemp;
+    rawGtemp = 1/rawGtemp;
+    rawBtemp = 1/rawBtemp;
+
+    //version 2: apply a small change multiple times
+    //((cam_xyz * sRGBd652xyz * [1; 1.1; 1;]) ./ (cam_xyz * sRGBd652xyz * [1; 1; 1;])) .^ (log(tint)/log(1.1))
+    matrixVectorMult(1, 1.1, 1, rawRtint, rawGtint, rawBtint, srgb2raw);
+    matrixVectorMult(1, 1, 1, origRtint, origGtint, origBtint, srgb2raw);
+    rawRtint /= origRtint;
+    rawGtint /= origGtint;
+    rawBtint /= origBtint;
+    rawRtint = pow(rawRtint, log(tint) / log(1.1));
+    rawGtint = pow(rawGtint, log(tint) / log(1.1));
+    rawBtint = pow(rawBtint, log(tint) / log(1.1));
+
+    const float tempMin = min(min(rawRtemp, rawGtemp), rawBtemp);
+    //Combine them
+    rMult = rawRtemp * rawRtint;
+    gMult = rawGtemp * rawGtint;
+    bMult = rawBtemp * rawBtint;
+
+    //Normalize
+    rMult = max(rMult, 0.00001f);
+    gMult = max(gMult, 0.00001f);
+    bMult = max(bMult, 0.00001f);
+
+    const float multMin = min(min(rMult, gMult), bMult);
+    rMult /= multMin;
+    gMult /= multMin;
+    bMult /= multMin;
 }
 
 //Computes the sRGB white balance multipliers, given that libraw has already applied the camera's set WB.
@@ -135,31 +178,61 @@ void whiteBalancePostMults(float temperature, float tint, float camToRgb[3][3],
     float BASE_TEMP = 6594.9982f;
     float BASE_TINT = 0.9864318f;
 
-    float rBaseMult, gBaseMult, bBaseMult;
+    //Libraw's pre_mul values are obtained from cam_xyz and D65. Here's the octave code for it:
+    //D65 = [.31271; .32902 .35827];
+    //d65_in_cam = cam_xyz * D65;
+    //pre_mul = max(d65_in_cam)./d65_in_cam;
+
+    //float rBaseMult, gBaseMult, bBaseMult;
     //Set the white balance arguments based on what libraw did.
+    cout << "whiteBalancePostMults rCamMul: " << rCamMul << endl;
+    cout << "whiteBalancePostMults gCamMul: " << gCamMul << endl;
+    cout << "whiteBalancePostMults bCamMul: " << bCamMul << endl;
+    cout << "whiteBalancePostMults rPreMul: " << rPreMul << endl;
+    cout << "whiteBalancePostMults gPreMul: " << gPreMul << endl;
+    cout << "whiteBalancePostMults bPreMul: " << bPreMul << endl;
+    cout << "whiteBalancePostMults cam mul harmonic mean: " << 2.0/(gCamMul/rCamMul + gCamMul/bCamMul) << endl;
+    cout << "whiteBalancePostMults pre mul harmonic mean: " << 2.0/(gPreMul/rPreMul + gPreMul/bPreMul) << endl;
 
     //First we divide the daylight multipliers by the camera multipliers.
-    float rrBaseMult = rPreMul / rCamMul;
-    float grBaseMult = gPreMul / gCamMul;
-    float brBaseMult = bPreMul / bCamMul;
-    float rawMultMin = min(min(rrBaseMult, grBaseMult), brBaseMult);
-    rrBaseMult /= rawMultMin;
-    grBaseMult /= rawMultMin;
-    brBaseMult /= rawMultMin;
+    //float rrBaseMult = rPreMul / rCamMul;
+    //float grBaseMult = gPreMul / gCamMul;
+    //float brBaseMult = bPreMul / bCamMul;
+    //float rawMultMin = min(min(rrBaseMult, grBaseMult), brBaseMult);
+    //rrBaseMult /= rawMultMin;
+    //grBaseMult /= rawMultMin;
+    //brBaseMult /= rawMultMin;
+    //cout << "whiteBalancePostMults rrBaseMult: " << rrBaseMult << endl;
+    //cout << "whiteBalancePostMults grBaseMult: " << grBaseMult << endl;
+    //cout << "whiteBalancePostMults brBaseMult: " << brBaseMult << endl;
+    for (int i = 0; i < 3; i++)
+    {
+        cout << "whiteBalancePostMults camToRGB: ";
+        for (int j = 0; j < 3; j++)
+        {
+            cout << camToRgb[i][j] << " ";
+        }
+        cout << endl;
+    }
     //And then we convert them from camera space to sRGB.
-    matrixVectorMult(rrBaseMult, grBaseMult, brBaseMult,
-                      rBaseMult,  gBaseMult,  bBaseMult,
-                      camToRgb);
+    //matrixVectorMult(rrBaseMult, grBaseMult, brBaseMult,
+    //                 rBaseMult,  gBaseMult,  bBaseMult,
+    //                 camToRgb);
+
+    //if we are not handling a raw, set the base multipliers to 1 and use 5200/1 for temp/tint
     if ((1.0f == camToRgb[0][0] && 1.0f == camToRgb[1][1] && 1.0f == camToRgb[2][2])
          || (1.0f == rPreMul && 1.0f == gPreMul && 1.0f == bPreMul))
     {
-        rBaseMult = 1;
-        gBaseMult = 1;
-        bBaseMult = 1;
+    //    rBaseMult = 1;
+    //    gBaseMult = 1;
+    //    bBaseMult = 1;
         BASE_TEMP = 5200;
         BASE_TINT = 1;
     }
     //The result of this is the BaseMultipliers in sRGB, which we use later.
+    //cout << "whiteBalancePostMults rBaseMult: " << rBaseMult << endl;
+    //cout << "whiteBalancePostMults gBaseMult: " << gBaseMult << endl;
+    //cout << "whiteBalancePostMults bBaseMult: " << bBaseMult << endl;
 
 
     //Here we compute the ratio of the desired to the reference (kinda daylight) illuminant.
@@ -196,10 +269,13 @@ void whiteBalancePostMults(float temperature, float tint, float camToRgb[3][3],
     bMult = max(bMult, 0.0f);
 
     //Multiply our desired WB by the base offsets to compensate for
-    // libraw already having applied them.
-    rMult *= rBaseMult;
-    gMult *= gBaseMult;
-    bMult *= bBaseMult;
+    // already having applied them.
+    //rMult *= rBaseMult;
+    //gMult *= gBaseMult;
+    //bMult *= bBaseMult;
+    //rMult /= rBaseMult;
+    //gMult /= gBaseMult;
+    //bMult /= bBaseMult;
 
     //Normalize so that no component shrinks ever. (It should never go to below zero.)
     float multMin = min(min(rMult, gMult), bMult)+0.00001f;
@@ -209,6 +285,7 @@ void whiteBalancePostMults(float temperature, float tint, float camToRgb[3][3],
 }
 
 //Computes the Eulerian distance from the WB coefficients to (1,1,1). Also adds the temp to it.
+/*
 float wbDistance(array<float,2> tempTint, float camToRgb[3][3],
                  float rCamMul, float gCamMul, float bCamMul,
                  float rPreMul, float gPreMul, float bPreMul)
@@ -218,20 +295,82 @@ float wbDistance(array<float,2> tempTint, float camToRgb[3][3],
                           rCamMul, gCamMul, bCamMul,
                           rPreMul, gPreMul, bPreMul,
                           rMult, gMult, bMult);
-    rMult -= 1;
-    gMult -= 1;
-    bMult -= 1;
+
+    float rrVal, grVal, brVal; //raw color
+    rrVal = rCamMul/rPreMul;
+    grVal = gCamMul/gPreMul;
+    brVal = bCamMul/bPreMul;
+    float rVal, gVal, bVal; //sRGB
+    matrixVectorMult(rrVal, grVal, brVal,
+                     rVal, gVal, bVal,
+                     camToRgb);
+
+    float rFactor = rMult/rVal;
+    float gFactor = gMult/gVal;
+    float bFactor = bMult/bVal;
+
+    rFactor -= 1;
+    gFactor -= 1;
+    bFactor -= 1;
 
     float output;
-    output = sqrt(rMult*rMult + gMult*gMult + bMult*bMult);
+    output = sqrt(rFactor*rFactor + gFactor*gFactor + bFactor*bFactor);
     return output;
+}
+*/
+
+//Exif lightsource tag decoding
+//We want to rank these by how close they are to d65 so that we can choose the right matrix from
+//a multi-illuminant DNG profile.
+//Lower scores will be better.
+int daylightScore(const int illuminant)
+{
+    switch (illuminant)
+    {
+    case 21:  return 0; //D65 (6500k)
+    case 19:  return 1; //standard light C (6774k)
+    case 1:   return 2; //"daylight"
+    case 9:   return 3; //"fine weather"
+    case 4:   return 4; //"flash"
+    case 12:  return 5; //daylight fluorescent (5700-7100k)
+    case 20:  return 6; //D55 (5500k)
+    case 10:  return 7; //"cloudy weather"
+    case 23:  return 8; //D50 (5000k)
+    case 13:  return 9; //day white fluorescent (4600-5400k)
+    case 18:  return 10; //standard light B (4874k)
+    case 2:   return 11; //fluorescent
+    case 22:  return 12; //D75 (7500k)
+    case 11:  return 13; //"shade"
+    case 14:  return 14; //cool white fluorescent (3900-4500k)
+    case 15:  return 15; //white fluorescent (3200-3700k)
+    case 17:  return 16; //stardard light A (2855k)
+    case 3:   return 17; //"tungsten"
+    case 24:  return 18; //"ISO studio tungsten"
+    case 255: return 19; //"other light source"
+    case 0:   return 20; //unknown
+    default:  return 21;
+    }
+}
+
+
+//Computes the distance from the WB coefficients to the target white balance coefficients
+float wbDistance(const array<float, 2> tempTint, const float cam_xyz[3][3],
+                 const float rMulTarget, const float gMulTarget, const float bMulTarget)
+{
+    float rMult, gMult, bMult;
+    whiteBalancePreMults(tempTint[0], tempTint[1], cam_xyz, rMult, gMult, bMult);
+    const float rFactor = rMult/rMulTarget - 1;
+    const float gFactor = gMult/gMulTarget - 1;
+    const float bFactor = bMult/bMulTarget - 1;
+    return sqrt(rFactor*rFactor + gFactor*gFactor + bFactor*bFactor);
 }
 
 //Run a Nelder-Mead simplex optimization on wbDistance.
 void optimizeWBMults(std::string file,
                      float &temperature, float &tint,
-                     const float rMul, const float gMul, const float bMul)
+                     const float rMul, const float gMul, const float bMul)//default to -1
 {
+    const bool isDNG = QString::fromStdString(file).endsWith(".dng", Qt::CaseInsensitive);
     //Load wb params from the raw file
     std::unique_ptr<LibRaw> libraw = std::unique_ptr<LibRaw>(new LibRaw());
 
@@ -254,7 +393,14 @@ void optimizeWBMults(std::string file,
         return;
     }
 
-    float camToRGB[3][3];
+    //float camToRGB[3][3];
+    float cam_xyz[3][3];
+
+    int dngProfile = 1;
+    if (daylightScore(libraw->imgdata.color.dng_color[0].illuminant) < daylightScore(libraw->imgdata.color.dng_color[1].illuminant))
+    {
+        dngProfile = 0;
+    }
 
     //get color matrix
     for (int i = 0; i < 3; i++)
@@ -262,7 +408,13 @@ void optimizeWBMults(std::string file,
         //cout << "camToRGB: ";
         for (int j = 0; j < 3; j++)
         {
-            camToRGB[i][j] = libraw->imgdata.color.rgb_cam[i][j];
+            //camToRGB[i][j] = libraw->imgdata.color.rgb_cam[i][j];
+            if (!isDNG)
+            {
+                cam_xyz[i][j] = libraw->imgdata.color.cam_xyz[i][j];
+            } else {
+                cam_xyz[i][j] = libraw->imgdata.color.dng_color[dngProfile].colormatrix[i][j];
+            }
             //cout << camToRGB[i][j] << " ";
         }
         //cout << endl;
@@ -306,9 +458,9 @@ void optimizeWBMults(std::string file,
     hiCoord[1]  = 1.0f;
 
     float low, mid, hi, oldLow;
-    low = wbDistance(lowCoord, camToRGB, rCamMul, gCamMul, bCamMul, rPreMul, gPreMul, bPreMul);
-    mid = wbDistance(midCoord, camToRGB, rCamMul, gCamMul, bCamMul, rPreMul, gPreMul, bPreMul);
-    hi  = wbDistance(hiCoord,  camToRGB, rCamMul, gCamMul, bCamMul, rPreMul, gPreMul, bPreMul);
+    low = wbDistance(lowCoord, cam_xyz, rCamMul, gCamMul, bCamMul);
+    mid = wbDistance(midCoord, cam_xyz, rCamMul, gCamMul, bCamMul);
+    hi  = wbDistance(hiCoord,  cam_xyz, rCamMul, gCamMul, bCamMul);
     float refl, exp, cont;
 
 #define TOLERANCE 0.000000001f
@@ -364,7 +516,7 @@ void optimizeWBMults(std::string file,
         //Reflect the worst point about the centroid.
         reflCoord[0] = meanCoord[0] + 1 * (meanCoord[0] - hiCoord[0]);
         reflCoord[1] = meanCoord[1] + 1 * (meanCoord[1] - hiCoord[1]);
-        refl = wbDistance(reflCoord, camToRGB, rCamMul, gCamMul, bCamMul, rPreMul, gPreMul, bPreMul);
+        refl = wbDistance(reflCoord, cam_xyz, rCamMul, gCamMul, bCamMul);
         if (refl < mid) //Better than the second-worst point
         {
             if (refl > low) //but not better than the old best point
@@ -376,7 +528,7 @@ void optimizeWBMults(std::string file,
             { //Try a point expanded farther away in the same direction.
                 expCoord[0] = meanCoord[0] + 2 * (meanCoord[0] - hiCoord[0]);
                 expCoord[1] = meanCoord[1] + 2 * (meanCoord[1] - hiCoord[1]);
-                exp = wbDistance(expCoord, camToRGB, rCamMul, gCamMul, bCamMul, rPreMul, gPreMul, bPreMul);
+                exp = wbDistance(expCoord, cam_xyz, rCamMul, gCamMul, bCamMul);
                 if (exp < refl) //It is the best so far
                 { //Swap this with the worst point
                     hiCoord.swap(expCoord);
@@ -393,7 +545,7 @@ void optimizeWBMults(std::string file,
         { //Compute a point contracted from the worst towards the centroid.
             contCoord[0] = meanCoord[0] - 0.5f * (meanCoord[0] - hiCoord[0]);
             contCoord[1] = meanCoord[1] - 0.5f * (meanCoord[1] - hiCoord[1]);
-            cont = wbDistance(contCoord, camToRGB, rCamMul, gCamMul, bCamMul, rPreMul, gPreMul, bPreMul);
+            cont = wbDistance(contCoord, cam_xyz, rCamMul, gCamMul, bCamMul);
             if (cont < hi) //Better than the worst point
             { //Replace the worst point with this.
                 hiCoord.swap(contCoord);
@@ -403,26 +555,71 @@ void optimizeWBMults(std::string file,
             { //Contract everything towards the best point, not the centroid.
                 hiCoord[0] = lowCoord[0] + 0.5f * (lowCoord[0] - hiCoord[0]);
                 hiCoord[1] = lowCoord[1] + 0.5f * (lowCoord[1] - hiCoord[1]);
-                hi = wbDistance(hiCoord, camToRGB, rCamMul, gCamMul, bCamMul, rPreMul, gPreMul, bPreMul);
+                hi = wbDistance(hiCoord, cam_xyz, rCamMul, gCamMul, bCamMul);
                 midCoord[0] = lowCoord[0] + 0.5f * (lowCoord[0] - midCoord[0]);
                 midCoord[1] = lowCoord[1] + 0.5f * (lowCoord[1] - midCoord[1]);
-                mid = wbDistance(midCoord, camToRGB, rCamMul, gCamMul, bCamMul, rPreMul, gPreMul, bPreMul);
+                mid = wbDistance(midCoord, cam_xyz, rCamMul, gCamMul, bCamMul);
             }
         }
     }
     temperature = lowCoord[0];
+    //limit temperature to prevent crashes when calculating planckian locus
+    if (temperature < 1500) //5D Classic hits its limit at 1674 but for custom WB we should be fine
+    {
+        cout << "Optimized WB temperature too low: " << temperature << endl;
+        temperature = 1500;
+    } else if (temperature > 20000)
+    {
+        cout << "Optimized WB temperature too high: " << temperature << endl;
+        temperature = 20000;
+    }
     tint = lowCoord[1];
+}
+
+//Undoes the camera WB which is applied before demosaicing, and then applies the user's WB
+void rawWhiteBalance(const matrix<float> &input, matrix<float> &output,
+                     const float temperature, const float tint, const float cam_xyz[3][3],
+                     float rCamMul, float gCamMul, float bCamMul,
+                     float & rUserMul, float & gUserMul, float & bUserMul)
+{
+    whiteBalancePreMults(temperature, tint, cam_xyz, rUserMul, gUserMul, bUserMul);
+    if (rCamMul <= 0) {rCamMul = 1;}
+    if (gCamMul <= 0) {gCamMul = 1;}
+    if (bCamMul <= 0) {gCamMul = 1;}
+    float temp_rUserMul = rUserMul/rCamMul;
+    float temp_gUserMul = gUserMul/gCamMul;
+    float temp_bUserMul = bUserMul/bCamMul;
+
+    const int nRows = input.nr();
+    const int nCols = input.nc();
+
+    output.set_size(nRows, nCols);
+
+#pragma omp parallel shared(output, input) firstprivate (nRows, nCols)
+    {
+#pragma omp for schedule(dynamic) nowait
+        for (int i = 0; i < nRows; i++)
+        {
+            for (int j = 0; j < nCols; j += 3)
+            {
+                output(i, j  ) = temp_rUserMul * input(i, j  );
+                output(i, j+1) = temp_gUserMul * input(i, j+1);
+                output(i, j+2) = temp_bUserMul * input(i, j+2);
+            }
+        }
+    }
 }
 
 //Actually apply a white balance to image data.
 //It takes in the input and output matrices, the desired temperature and tint,
 // and the filename where it looks up the camera matrix and daylight multipliers.
-//It also takes in the camera matrix and the raw color space WB multipliers.
+//It simultaneously applies the camera matrix and exposure compensation while doing white balance.
+//It also clips zeros at this point.
 void whiteBalance(matrix<float> &input, matrix<float> &output,
                   float temperature, float tint, float cam2rgb[3][3],
-                  float rCamMul, float gCamMul, float bCamMul,
-                  float rPreMul, float gPreMul, float bPreMul,
-                  float maxValue, float factor)
+                  float rCamMul, float gCamMul, float bCamMul,//what the camera asked for and is already applied
+                  float rPreMul, float gPreMul, float bPreMul,//reference for camera's daylight wb
+                  float expCompMult)
 {
     float rMult, gMult, bMult;
     whiteBalancePostMults(temperature, tint, cam2rgb,
@@ -439,28 +636,15 @@ void whiteBalance(matrix<float> &input, matrix<float> &output,
     float transform[3][3];
     for (int i = 0; i < 3; i++)
     {
-        transform[0][i] = factor * rMult * cam2rgb[0][i];
-        transform[1][i] = factor * gMult * cam2rgb[1][i];
-        transform[2][i] = factor * bMult * cam2rgb[2][i];
+        transform[0][i] = expCompMult * rMult * cam2rgb[0][i];
+        transform[1][i] = expCompMult * gMult * cam2rgb[1][i];
+        transform[2][i] = expCompMult * bMult * cam2rgb[2][i];
     }
-    //transform[0][0] = 1.0f;
-    //transform[1][1] = 1.0f;
-    //transform[2][2] = 1.0f;
 
     int nRows = input.nr();
     int nCols = input.nc();
 
     output.set_size(nRows, nCols);
-
-    /*
-    int case1 = 0;
-    int case2 = 0;
-    int case3 = 0;
-    int case4 = 0;
-    int case5 = 0;
-    int case6 = 0;
-    int case7 = 0;
-    */
 
 #pragma omp parallel shared(output, input) firstprivate(nRows, nCols)
     {
@@ -469,91 +653,60 @@ void whiteBalance(matrix<float> &input, matrix<float> &output,
         {
             for (int j = 0; j < nCols; j += 3)
             {
-                //highlight handling
-                //If the channel with the lowest camera multipliers is clipped, then clip the other channels in that pixel so as to not drag down the brightness
-                /*
-                bool rClipped = (input(i,j  ) > maxValue);
-                bool gClipped = (input(i,j+1) > maxValue);
-                bool bClipped = (input(i,j+2) > maxValue);
-
-                if (rClipped && !gClipped && !bClipped) //only red is clipped
-                {
-                    case1++;
-                    input(i,j+1) = min(input(i,j+1),input(i,j+1)*rCamMul/gCamMul); //reduce green if necessary
-                    input(i,j+2) = min(input(i,j+2),input(i,j+2)*rCamMul/bCamMul); //reduce blue if necessary
-                }
-                if (!rClipped && gClipped && !bClipped)
-                {
-                    case2++;
-                    input(i,j  ) = min(input(i,j  ),input(i,j  )*gCamMul/rCamMul);
-                    input(i,j+2) = min(input(i,j+2),input(i,j+2)*gCamMul/bCamMul);
-                }
-                if (!rClipped && !gClipped && bClipped)
-                {
-                    case3++;
-                    input(i,j  ) = min(input(i,j  ),input(i,j  )*bCamMul/rCamMul);
-                    input(i,j+1) = min(input(i,j+1),input(i,j+1)*bCamMul/gCamMul);
-                }
-
-                if (rClipped && gClipped && !bClipped) //red and green are both clipped;
-                {
-                    case4++;
-                    input(i,j  ) = min(input(i,j  ),input(i,j  )*min(rCamMul,gCamMul)/rCamMul);//reduce relative to the clipped channel with the lowest multpilier
-                    input(i,j+1) = min(input(i,j+1),input(i,j+1)*min(rCamMul,gCamMul)/gCamMul);
-                    input(i,j+2) = min(input(i,j+2),input(i,j+2)*min(rCamMul,gCamMul)/bCamMul);
-                }
-                if (rClipped && !gClipped && bClipped)
-                {
-                    case5++;
-                    input(i,j  ) = min(input(i,j  ),input(i,j  )*min(rCamMul,bCamMul)/rCamMul);
-                    input(i,j+1) = min(input(i,j+1),input(i,j+1)*min(rCamMul,bCamMul)/gCamMul);
-                    input(i,j+2) = min(input(i,j+2),input(i,j+2)*min(rCamMul,bCamMul)/bCamMul);
-                }
-                if (!rClipped && gClipped && bClipped)
-                {
-                    case6++;
-                    input(i,j  ) = min(input(i,j  ),input(i,j  )*min(gCamMul,bCamMul)/rCamMul);
-                    input(i,j+1) = min(input(i,j+1),input(i,j+1)*min(gCamMul,bCamMul)/gCamMul);
-                    input(i,j+2) = min(input(i,j+2),input(i,j+2)*min(gCamMul,bCamMul)/bCamMul);
-                }
-                if (rClipped && gClipped && bClipped) //all channels are clipped
-                {
-                    case7++;
-                    input(i,j  ) = min(input(i,j  ),input(i,j  )*min(min(rCamMul,gCamMul),bCamMul)/rCamMul);
-                    input(i,j+1) = min(input(i,j+1),input(i,j+1)*min(min(rCamMul,gCamMul),bCamMul)/gCamMul);
-                    input(i,j+2) = min(input(i,j+2),input(i,j+2)*min(min(rCamMul,gCamMul),bCamMul)/bCamMul);
-                }
-                */
-
-                //Actually set output according to camera matrix and pre and post multipliers
-                //output(i, j  ) = max(0.0f, transform[0][0]*rCamMul*input(i, j) + transform[0][1]*gCamMul*input(i, j+1) + transform[0][2]*bCamMul*input(i, j+2));
-                //output(i, j+1) = max(0.0f, transform[1][0]*rCamMul*input(i, j) + transform[1][1]*gCamMul*input(i, j+1) + transform[1][2]*bCamMul*input(i, j+2));
-                //output(i, j+2) = max(0.0f, transform[2][0]*rCamMul*input(i, j) + transform[2][1]*gCamMul*input(i, j+1) + transform[2][2]*bCamMul*input(i, j+2));
                 output(i, j  ) = max(0.0f, transform[0][0]*input(i, j) + transform[0][1]*input(i, j+1) + transform[0][2]*input(i, j+2));
                 output(i, j+1) = max(0.0f, transform[1][0]*input(i, j) + transform[1][1]*input(i, j+1) + transform[1][2]*input(i, j+2));
                 output(i, j+2) = max(0.0f, transform[2][0]*input(i, j) + transform[2][1]*input(i, j+1) + transform[2][2]*input(i, j+2));
 
-                /*
-                if (rClipped || gClipped || bClipped)
-                {
-                    if (i%2 == 0)
-                    {
-                        output(i,j+0) = 0.0f;
-                        output(i,j+1) = 0.0f;
-                        output(i,j+2) = 0.0f;
-                    }
-                }*/
             }
         }
     }
+}
 
-    /*
-    cout << "case1: " << case1 << endl;
-    cout << "case2: " << case2 << endl;
-    cout << "case3: " << case3 << endl;
-    cout << "case4: " << case4 << endl;
-    cout << "case5: " << case5 << endl;
-    cout << "case6: " << case6 << endl;
-    cout << "case7: " << case7 << endl;
-    */
+//Actually apply a white balance to image data.
+//It takes in the input and output matrices, the desired temperature and tint,
+// and the filename where it looks up the camera matrix and daylight multipliers.
+//This one expects sRGB inputs to start.
+//It does, however apply exposure compensation.
+//It also clips zeros at this point.
+void sRGBwhiteBalance(matrix<float> &input, matrix<float> &output,
+                      float temperature, float tint, float cam2rgb[3][3],
+                      float rCamMul, float gCamMul, float bCamMul,//what the camera asked for and is already applied
+                      float rPreMul, float gPreMul, float bPreMul,//reference for camera's daylight wb
+                      float expCompMult)
+{
+    float rMult, gMult, bMult;
+    whiteBalancePostMults(temperature, tint, cam2rgb,
+                          rCamMul, gCamMul, bCamMul,
+                          rPreMul, gPreMul, bPreMul,
+                          rMult, gMult, bMult);
+    cout << "rmult: " << rMult << endl;
+    cout << "gmult: " << gMult << endl;
+    cout << "bmult: " << bMult << endl;
+    cout << "rCamMul: " << rCamMul << endl;
+    cout << "gCamMul: " << gCamMul << endl;
+    cout << "bCamMul: " << bCamMul << endl;
+
+    rMult = rMult * expCompMult;
+    gMult = gMult * expCompMult;
+    bMult = bMult * expCompMult;
+
+    int nRows = input.nr();
+    int nCols = input.nc();
+
+    output.set_size(nRows, nCols);
+
+#pragma omp parallel shared(output, input) firstprivate(nRows, nCols)
+    {
+#pragma omp for schedule(dynamic) nowait
+        for (int i = 0; i < nRows; i++)
+        {
+            for (int j = 0; j < nCols; j += 3)
+            {
+                output(i, j  ) = max(0.0f, rMult*input(i, j  ));
+                output(i, j+1) = max(0.0f, gMult*input(i, j+1));
+                output(i, j+2) = max(0.0f, bMult*input(i, j+2));
+
+            }
+        }
+    }
 }

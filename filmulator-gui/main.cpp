@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <QtGui/QGuiApplication>
 #include <QtQml>
-#include "qtquick2applicationviewer.h"
+#include "qtquick2applicationviewer/qtquick2applicationviewer.h"
 #include <QtSql/QSqlDatabase>
 #include <QTranslator>
 #include "ui/filmImageProvider.h"
@@ -175,7 +175,7 @@ int main(int argc, char *argv[])
         qWarning("Error: your root item has to be a Window");
         return -1;
     }
-    window->setIcon(QIcon(":/icons/filmulator64icon.png"));
+    window->setIcon(QIcon(":/icons/filmulator64icon_square.png"));
 
     cout << QDateTime::currentDateTime().toString("hh:mm:ss.zzz ").toStdString() << "showing window" << endl;
     window->show();

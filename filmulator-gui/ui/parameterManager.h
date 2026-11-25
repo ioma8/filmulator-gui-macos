@@ -1,73 +1,103 @@
 #ifndef PARAMETERMANAGER_H
 #define PARAMETERMANAGER_H
 
-#include <QObject>
-#include <QVariant>
-#include <QSqlQuery>
-#include <QSqlRecord>
-#include <QMutex>
-#include <QMutexLocker>
-#include <QDateTime>
-#include <QString>
-#include <QDebug>
-#include <tuple>
-#include <iostream>
-#include <memory>
-#include <lensfun/lensfun.h>
 #include "../core/filmSim.hpp"
 #include "../database/exifFunctions.h"
+#include <QDateTime>
+#include <QDebug>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QObject>
+#include <QSqlQuery>
+#include <QSqlRecord>
+#include <QString>
+#include <QVariant>
+#include <iostream>
+#include <lensfun/lensfun.h>
+#include <memory>
+#include <string>
+#include <tuple>
 
-enum Valid {none,
-            partload,
-            load,
-            partdemosaic,
-            demosaic,
-            partprefilmulation,
-            prefilmulation,
-            partfilmulation,
-            filmulation,
-            partblackwhite,
-            blackwhite,
-            partcolorcurve,
-            colorcurve,
-            partfilmlikecurve,
-            filmlikecurve,
-            count};
+enum Valid {
+  none,
+  partload,
+  load,
+  partdemosaic,
+  demosaic,
+  partpostdemosaic,
+  postdemosaic,
+  partnrnlmeans,
+  nrnlmeans,
+  partnrimpulse,
+  nrimpulse,
+  partnrchroma,
+  nrchroma,
+  partprefilmulation,
+  prefilmulation,
+  partfilmulation,
+  filmulation,
+  partblackwhite,
+  blackwhite,
+  partcolorcurve,
+  colorcurve,
+  partfilmlikecurve,
+  filmlikecurve,
+  count
+};
 
-enum FilmFetch {initial,
-                subsequent};
+enum FilmFetch { initial, subsequent };
 
-enum AbortStatus {proceed,
-                  restart};
+enum AbortStatus { proceed, restart };
 
-enum CopyDefaults {loadToParams,
-                   loadOnlyDefaults};
+enum CopyDefaults { loadToParams, loadOnlyDefaults };
 
-//We want a struct for each stage of the pipeline for validity.
+// We want a struct for each stage of the pipeline for validity.
 struct LoadParams {
-    std::string fullFilename;
-    bool tiffIn;
-    bool jpegIn;
+  std::string fullFilename;
+  bool tiffIn;
+  bool jpegIn;
 };
 
 struct DemosaicParams {
-    int caEnabled;
-    int highlights;
-    QString cameraName;
-    QString lensName;
-    bool lensfunCA;
-    bool lensfunVignetting;
-    bool lensfunDistortion;
-    float focalLength;
-    float fnumber;
-    float rotationAngle;
+  int caEnabled;
+  int demosaicMethod;
+};
+
+struct PostDemosaicParams {
+  float temperature;
+  float tint;
+  int highlights;
+  bool nrEnabled;
+  float exposureComp;
+};
+
+struct NlmeansNRParams {
+  bool nrEnabled;
+  int nlClusters;
+  float nlThresh;
+  float nlStrength;
+};
+
+struct ImpulseNRParams {
+  bool nrEnabled;
+  float impulseThresh;
+};
+
+struct ChromaNRParams {
+  bool nrEnabled;
+  float chromaStrength;
 };
 
 struct PrefilmParams {
-    float exposureComp;
-    float temperature;
-    float tint;
-    std::string fullFilename;
+  bool nrEnabled;
+  QString cameraName;
+  QString lensName;
+  bool lensfunCA;
+  bool lensfunVignetting;
+  bool lensfunDistortion;
+  float focalLength;
+  float fnumber;
+  float rotationAngle;
 };
 
 struct FilmParams {
@@ -89,37 +119,38 @@ struct FilmParams {
     float layerTimeDivisor;
     float rolloffBoundary;
     float toeBoundary;
+    float highlightCrosstalk;
 };
 
 struct BlackWhiteParams {
-    float blackpoint;
-    float whitepoint;
-    float cropHeight;
-    float cropAspect;
-    float cropVoffset;
-    float cropHoffset;
-    int rotation;
+  float blackpoint;
+  float whitepoint;
+  float cropHeight;
+  float cropAspect;
+  float cropVoffset;
+  float cropHoffset;
+  int rotation;
 };
 
-struct CropParams {//just for cropping the histogram search area
-    float cropHeight;
-    float cropAspect;
-    float cropVoffset;
-    float cropHoffset;
-    int rotation;
+struct CropParams { // just for cropping the histogram search area
+  float cropHeight;
+  float cropAspect;
+  float cropVoffset;
+  float cropHoffset;
+  int rotation;
 };
 
 struct FilmlikeCurvesParams {
-    float shadowsX;
-    float shadowsY;
-    float highlightsX;
-    float highlightsY;
-    float vibrance;
-    float saturation;
-    bool monochrome;
-    float bwRmult;
-    float bwGmult;
-    float bwBmult;
+  float shadowsX;
+  float shadowsY;
+  float highlightsX;
+  float highlightsY;
+  float vibrance;
+  float saturation;
+  bool monochrome;
+  float bwRmult;
+  float bwGmult;
+  float bwBmult;
 };
 
 class ParameterManager : public QObject
@@ -145,13 +176,48 @@ class ParameterManager : public QObject
     Q_PROPERTY(bool lensfunDistAvail READ getLensfunDistAvail NOTIFY lensfunDistAvailChanged)
     //Read-only thing for custom wb
     Q_PROPERTY(bool customWbAvail    READ getCustomWbAvail    NOTIFY customWbAvailChanged)
+    //Read-only thing for general monochromeness (monochrome raws don't need this)
+    Q_PROPERTY(bool colorAvail       READ getColorAvail       NOTIFY colorAvailChanged)
+    //Read-only thing for demosaicing
+    Q_PROPERTY(bool demosaicAvail    READ getDemosaicAvail    NOTIFY demosaicAvailChanged)
 
     Q_PROPERTY(bool tiffIn MEMBER m_tiffIn WRITE setTiffIn NOTIFY tiffInChanged)
     Q_PROPERTY(bool jpegIn MEMBER m_jpegIn WRITE setJpegIn NOTIFY jpegInChanged)
 
     //Demosaic
-    Q_PROPERTY(int caEnabled        MEMBER s_caEnabled      WRITE setCaEnabled      NOTIFY caEnabledChanged)
-    Q_PROPERTY(int highlights       MEMBER m_highlights     WRITE setHighlights     NOTIFY highlightsChanged)
+    Q_PROPERTY(int caEnabled      MEMBER s_caEnabled      WRITE setCaEnabled      NOTIFY caEnabledChanged)
+    Q_PROPERTY(int demosaicMethod MEMBER m_demosaicMethod WRITE setDemosaicMethod NOTIFY demosaicMethodChanged)
+
+    Q_PROPERTY(int defCaEnabled      READ getDefCaEnabled      NOTIFY defCaEnabledChanged)
+    Q_PROPERTY(int defDemosaicMethod READ getDefDemosaicMethod NOTIFY defDemosaicMethodChanged)
+
+    //Postdemosaic
+    Q_PROPERTY(float temperature  MEMBER m_temperature  WRITE setTemperature  NOTIFY temperatureChanged)
+    Q_PROPERTY(float tint         MEMBER m_tint         WRITE setTint         NOTIFY tintChanged)
+    Q_PROPERTY(int   highlights   MEMBER m_highlights   WRITE setHighlights   NOTIFY highlightsChanged)
+    Q_PROPERTY(float exposureComp MEMBER m_exposureComp WRITE setExposureComp NOTIFY exposureCompChanged)
+
+    Q_PROPERTY(float defTemperature  READ getDefTemperature  NOTIFY defTemperatureChanged)
+    Q_PROPERTY(float defTint         READ getDefTint         NOTIFY defTintChanged)
+    Q_PROPERTY(int defHighlights     READ getDefHighlights   NOTIFY defHighlightsChanged)
+    Q_PROPERTY(float defExposureComp READ getDefExposureComp NOTIFY defExposureCompChanged)
+
+    //Noise reduction (split into 3 stages)
+    Q_PROPERTY(bool nrEnabled       MEMBER m_nrEnabled      WRITE setNrEnabled      NOTIFY nrEnabledChanged)
+    Q_PROPERTY(int nlClusters       MEMBER m_nlClusters     WRITE setNlClusters     NOTIFY nlClustersChanged)
+    Q_PROPERTY(float nlThresh       MEMBER m_nlThresh       WRITE setNlThresh       NOTIFY nlThreshChanged)
+    Q_PROPERTY(float nlStrength     MEMBER m_nlStrength     WRITE setNlStrength     NOTIFY nlStrengthChanged)
+    Q_PROPERTY(float impulseThresh  MEMBER m_impulseThresh  WRITE setImpulseThresh  NOTIFY impulseThreshChanged)
+    Q_PROPERTY(float chromaStrength MEMBER m_chromaStrength WRITE setChromaStrength NOTIFY chromaStrengthChanged)
+
+    Q_PROPERTY(bool defNrEnabled       READ getDefNrEnabled      NOTIFY defNrEnabledChanged)
+    Q_PROPERTY(int defNlClusters       READ getDefNlClusters     NOTIFY defNlClustersChanged)
+    Q_PROPERTY(float defNlThresh       READ getDefNlThresh       NOTIFY defNlThreshChanged)
+    Q_PROPERTY(float defNlStrength     READ getDefNlStrength     NOTIFY defNlStrengthChanged)
+    Q_PROPERTY(float defImpulseThresh  READ getDefImpulseThresh  NOTIFY defImpulseThreshChanged)
+    Q_PROPERTY(float defChromaStrength READ getDefChromaStrength NOTIFY defChromaStrengthChanged)
+
+    //Prefilmulation
     Q_PROPERTY(QString lensfunName  MEMBER s_lensfunName    WRITE setLensfunName    NOTIFY lensfunNameChanged)
     Q_PROPERTY(int lensfunCa        MEMBER s_lensfunCa      WRITE setLensfunCa      NOTIFY lensfunCaChanged)
     Q_PROPERTY(int lensfunVign      MEMBER s_lensfunVign    WRITE setLensfunVign    NOTIFY lensfunVignChanged)
@@ -160,8 +226,6 @@ class ParameterManager : public QObject
     Q_PROPERTY(float rotationPointX MEMBER m_rotationPointX WRITE setRotationPointX NOTIFY rotationPointXChanged)
     Q_PROPERTY(float rotationPointY MEMBER m_rotationPointY WRITE setRotationPointY NOTIFY rotationPointYChanged)
 
-    Q_PROPERTY(int defCaEnabled        READ getDefCaEnabled      NOTIFY defCaEnabledChanged)
-    Q_PROPERTY(int defHighlights       READ getDefHighlights     NOTIFY defHighlightsChanged)
     Q_PROPERTY(QString defLensfunName  READ getDefLensfunName    NOTIFY defLensfunNameChanged)
     Q_PROPERTY(int defLensfunCa        READ getDefLensfunCa      NOTIFY defLensfunCaChanged)
     Q_PROPERTY(int defLensfunVign      READ getDefLensfunVign    NOTIFY defLensfunVignChanged)
@@ -169,15 +233,6 @@ class ParameterManager : public QObject
     Q_PROPERTY(float defRotationAngle  READ getDefRotationAngle  NOTIFY defRotationAngleChanged)
     Q_PROPERTY(float defRotationPointX READ getDefRotationPointX NOTIFY defRotationPointXChanged)
     Q_PROPERTY(float defRotationPointY READ getDefRotationPointY NOTIFY defRotationPointYChanged)
-
-    //Prefilmulation
-    Q_PROPERTY(float exposureComp MEMBER m_exposureComp WRITE setExposureComp NOTIFY exposureCompChanged)
-    Q_PROPERTY(float temperature  MEMBER m_temperature  WRITE setTemperature NOTIFY temperatureChanged)
-    Q_PROPERTY(float tint         MEMBER m_tint         WRITE setTint NOTIFY tintChanged)
-
-    Q_PROPERTY(float defExposureComp READ getDefExposureComp NOTIFY defExposureCompChanged)
-    Q_PROPERTY(float defTemperature  READ getDefTemperature  NOTIFY defTemperatureChanged)
-    Q_PROPERTY(float defTint         READ getDefTint         NOTIFY defTintChanged)
 
     //Filmulation
     Q_PROPERTY(float initialDeveloperConcentration MEMBER m_initialDeveloperConcentration WRITE setInitialDeveloperConcentration NOTIFY initialDeveloperConcentrationChanged)
@@ -198,6 +253,7 @@ class ParameterManager : public QObject
     Q_PROPERTY(float layerTimeDivisor              MEMBER m_layerTimeDivisor              WRITE setLayerTimeDivisor              NOTIFY layerTimeDivisorChanged)
     Q_PROPERTY(float rolloffBoundary               MEMBER m_rolloffBoundary               WRITE setRolloffBoundary               NOTIFY rolloffBoundaryChanged)
     Q_PROPERTY(float toeBoundary                   MEMBER m_toeBoundary                   WRITE setToeBoundary                   NOTIFY toeBoundaryChanged)
+    Q_PROPERTY(float highlightCrosstalk            MEMBER m_highlightCrosstalk            WRITE setHighlightCrosstalk            NOTIFY highlightCrosstalkChanged)
 
     Q_PROPERTY(float defInitialDeveloperConcentration READ getDefInitialDeveloperConcentration NOTIFY defInitialDeveloperConcentrationChanged)
     Q_PROPERTY(float defReservoirThickness            READ getDefReservoirThickness            NOTIFY defReservoirThicknessChanged)
@@ -217,6 +273,7 @@ class ParameterManager : public QObject
     Q_PROPERTY(float defLayerTimeDivisor              READ getDefLayerTimeDivisor              NOTIFY defLayerTimeDivisorChanged)
     Q_PROPERTY(float defRolloffBoundary               READ getDefRolloffBoundary               NOTIFY defRolloffBoundaryChanged)
     Q_PROPERTY(float defToeBoundary                   READ getDefToeBoundary                   NOTIFY defToeBoundaryChanged)
+    Q_PROPERTY(float defHighlightCrosstalk            READ getDefHighlightCrosstalk            NOTIFY defHighlightCrosstalkChanged)
 
     //Whitepoint & Blackpoint
     Q_PROPERTY(float blackpoint  MEMBER m_blackpoint  WRITE setBlackpoint  NOTIFY blackpointChanged)
@@ -309,6 +366,22 @@ public:
     AbortStatus claimDemosaicAbort();
     Valid markDemosaicComplete();
 
+    //Postdemosaic
+    std::tuple<Valid,AbortStatus,PostDemosaicParams> claimPostDemosaicParams();
+    AbortStatus claimPostDemosaicAbort();
+    Valid markPostDemosaicComplete();
+
+    //Noise Reduction
+    std::tuple<Valid,AbortStatus,NlmeansNRParams> claimNlmeansNRParams();
+    std::tuple<Valid,AbortStatus,ImpulseNRParams> claimImpulseNRParams();
+    std::tuple<Valid,AbortStatus,ChromaNRParams> claimChromaNRParams();
+    AbortStatus claimNlmeansNRAbort();
+    AbortStatus claimImpulseNRAbort();
+    AbortStatus claimChromaNRAbort();
+    Valid markNlmeansNRComplete();
+    Valid markImpulseNRComplete();
+    Valid markChromaNRComplete();
+
     //Prefilmulation
     std::tuple<Valid,AbortStatus,PrefilmParams> claimPrefilmParams();
     AbortStatus claimPrefilmAbort();
@@ -364,12 +437,31 @@ public:
 
     bool getCustomWbAvail(){return customWbAvail;}
 
+    bool getColorAvail(){return colorAvail;}
+    bool getDemosaicAvail(){return demosaicAvail;}
+
     bool getPasteable(){return pasteable;}
 
     //Getters for the defaults
     //Demosaic
     int getDefCaEnabled(){return d_caEnabled;}
+    int getDefDemosaicMethod(){return d_demosaicMethod;}
+
+    //Postdemosaic
+    float getDefTemperature(){return d_temperature;}
+    float getDefTint(){return d_tint;}
     int getDefHighlights(){return d_highlights;}
+    float getDefExposureComp(){return d_exposureComp;}
+
+    //Noise Reduction
+    bool getDefNrEnabled(){return d_nrEnabled;}
+    int getDefNlClusters(){return d_nlClusters;}
+    float getDefNlThresh(){return d_nlThresh;}
+    float getDefNlStrength(){return d_nlStrength;}
+    float getDefImpulseThresh(){return d_impulseThresh;}
+    float getDefChromaStrength(){return d_chromaStrength;}
+
+    //Prefilmulation
     QString getDefLensfunName(){return d_lensfunName;}
     int getDefLensfunCa(){return d_lensfunCa;}
     int getDefLensfunVign(){return d_lensfunVign;}
@@ -377,11 +469,6 @@ public:
     float getDefRotationAngle(){return d_rotationAngle;}
     float getDefRotationPointX(){return d_rotationPointX;}
     float getDefRotationPointY(){return d_rotationPointY;}
-
-    //Prefilmulation
-    float getDefExposureComp(){return d_exposureComp;}
-    float getDefTemperature(){return d_temperature;}
-    float getDefTint(){return d_tint;}
 
     //Filmulation
     float getDefInitialDeveloperConcentration(){return d_initialDeveloperConcentration;}
@@ -402,6 +489,7 @@ public:
     float getDefLayerTimeDivisor(){return d_layerTimeDivisor;}
     float getDefRolloffBoundary(){return d_rolloffBoundary;}
     float getDefToeBoundary(){return d_toeBoundary;}
+    float getDefHighlightCrosstalk(){return d_highlightCrosstalk;}
 
     //Whitepoint & blackpoint
     float getDefBlackpoint(){return d_blackpoint;}
@@ -430,7 +518,23 @@ public:
 
     //Demosaic
     int getCaEnabled(){return s_caEnabled;}
+    int getDemosaicMethod(){return m_demosaicMethod;}
+
+    //Postdemosaic
+    float getTemperature(){return m_temperature;}
+    float getTint(){return m_tint;}
     int getHighlights(){return m_highlights;}
+    float getExposureComp(){return m_exposureComp;}
+
+    //Noise Reduction
+    bool getNrEnabled(){return m_nrEnabled;}
+    int getNlClusters(){return m_nlClusters;}
+    float getNlThresh(){return m_nlThresh;}
+    float getNlStrength(){return m_nlStrength;}
+    float getImpulseThresh(){return m_impulseThresh;}
+    float getChromaStrength(){return m_chromaStrength;}
+
+    //Prefilmulation
     QString getLensfunName(){return s_lensfunName;}
     int getLensfunCa(){return s_lensfunCa;}
     int getLensfunVign(){return s_lensfunVign;}
@@ -438,11 +542,6 @@ public:
     float getRotationAngle(){return m_rotationAngle;}
     float getRotationPointX(){return m_rotationPointX;}
     float getRotationPointY(){return m_rotationPointY;}
-
-    //Prefilmulation
-    float getExposureComp(){return m_exposureComp;}
-    float getTemperature(){return m_temperature;}
-    float getTint(){return m_tint;}
 
     //Filmulation
     float getInitialDeveloperConcentration(){return m_initialDeveloperConcentration;}
@@ -463,6 +562,7 @@ public:
     float getLayerTimeDivisor(){return m_layerTimeDivisor;}
     float getRolloffBoundary(){return m_rolloffBoundary;}
     float getToeBoundary(){return m_toeBoundary;}
+    float getHighlightCrosstalk(){return m_highlightCrosstalk;}
 
     //Whitepoint & blackpoint
     float getBlackpoint(){return m_blackpoint;}
@@ -489,14 +589,14 @@ public:
 
 
 public slots:
-    //When the quick pipeline gets the params changed, we'll automatically
-    // have the clone pipeline update its params.
-    //This will turn changeMadeSinceCheck true, but only if it's a clone
-    void cloneParams(ParameterManager * sourceParams);
+  // When the quick pipeline gets the params changed, we'll automatically
+  //  have the clone pipeline update its params.
+  // This will turn changeMadeSinceCheck true, but only if it's a clone
+  void cloneParams(ParameterManager *sourceParams);
 
-    //If this is a preload pipeline, we need to stop computation
-    // when *another* pipeline changes, but we don't need params copied
-    void cancelComputation();
+  // If this is a preload pipeline, we need to stop computation
+  //  when *another* pipeline changes, but we don't need params copied
+  void cancelComputation();
 
 protected:
     //This is here for the sql insertion to pull the values from.
@@ -545,11 +645,14 @@ protected:
     QString make;
     QString model;
     QString exifLensName;
-    bool autoCaAvail; //For non-Bayer sensors this is not available
+    bool autoCaAvail; //For non-Bayer sensors this is not available (also counts for demosaic)
     bool lensfunCaAvail; //These vary depending on camera and lens (and the lensfun db)
     bool lensfunVignAvail;
     bool lensfunDistAvail;
     bool customWbAvail;
+    bool isMonochrome;
+    bool colorAvail;
+    bool demosaicAvail;
 
     Valid validity;
     Valid validityWhenCanceled;
@@ -565,7 +668,38 @@ protected:
     //Demosaic
     int s_caEnabled;//similar to the lensfun stuff
     int m_caEnabled;
+    int m_demosaicMethod;
+
+    int d_caEnabled; //d_'s are for default values
+    int d_demosaicMethod;
+
+    //Postdemosaic
+    float m_temperature;
+    float m_tint;
     int m_highlights;
+    float m_exposureComp;
+
+    float d_temperature;
+    float d_tint;
+    int d_highlights;     //d's are for default values
+    float d_exposureComp;
+
+    //Noise Reduction
+    bool m_nrEnabled;
+    int m_nlClusters;
+    float m_nlThresh;
+    float m_nlStrength;
+    float m_impulseThresh;
+    float m_chromaStrength;
+
+    bool d_nrEnabled;
+    int d_nlClusters;
+    float d_nlThresh;
+    float d_nlStrength;
+    float d_impulseThresh;
+    float d_chromaStrength;
+
+    //Prefilmulation
     QString s_lensfunName;//staging params filled at load and also when manually changed
     int s_lensfunCa;      //These don't get written back
     int s_lensfunVign;
@@ -578,8 +712,6 @@ protected:
     float m_rotationPointX;
     float m_rotationPointY;
 
-    int d_caEnabled; //d_'s are for default values
-    int d_highlights;
     QString d_lensfunName;//*not* a blank string, but actually the lens that is either exif-automatched or in prefs
     int d_lensfunCa;      //*not* -1, but actually from prefs
     int d_lensfunVign;    //They get filled a) at loading time, or b) when lens prefs are set or erased
@@ -587,15 +719,6 @@ protected:
     float d_rotationAngle;
     float d_rotationPointX;
     float d_rotationPointY;
-
-    //Prefilmulation
-    float m_exposureComp;
-    float m_temperature;
-    float m_tint;
-
-    float d_exposureComp;
-    float d_temperature;
-    float d_tint;
 
     //Filmulation
     float m_initialDeveloperConcentration;
@@ -616,6 +739,7 @@ protected:
     float m_layerTimeDivisor;
     float m_rolloffBoundary;
     float m_toeBoundary;
+    float m_highlightCrosstalk;
 
     float d_initialDeveloperConcentration;
     float d_reservoirThickness;
@@ -635,6 +759,7 @@ protected:
     float d_layerTimeDivisor;
     float d_rolloffBoundary;
     float d_toeBoundary;
+    float d_highlightCrosstalk;
 
     //Whitepoint & Blackpoint
     float m_blackpoint;
@@ -682,7 +807,23 @@ protected:
 
     //Demosaic
     void setCaEnabled(int);
+    void setDemosaicMethod(int);
+
+    //Postdemosaic
+    void setTemperature(float);
+    void setTint(float);
     void setHighlights(int);
+    void setExposureComp(float);
+
+    //Noise Reduction
+    void setNrEnabled(bool);
+    void setNlClusters(int);
+    void setNlThresh(float);
+    void setNlStrength(float);
+    void setImpulseThresh(float);
+    void setChromaStrength(float);
+
+    //Prefilmulation
     void setLensfunName(QString);
     void setLensfunCa(int);
     void setLensfunVign(int);
@@ -690,11 +831,6 @@ protected:
     void setRotationAngle(float);
     void setRotationPointX(float);
     void setRotationPointY(float);
-
-    //Prefilmulation
-    void setExposureComp(float);
-    void setTemperature(float);
-    void setTint(float);
 
     //Filmulation
     void setInitialDeveloperConcentration(float);
@@ -715,6 +851,7 @@ protected:
     void setLayerTimeDivisor(float);
     void setRolloffBoundary(float);
     void setToeBoundary(float);
+    void setHighlightCrosstalk(float);
 
     //Whitepoint & Blackpoint
     void setBlackpoint(float);
@@ -758,6 +895,8 @@ signals:
     void lensfunVignAvailChanged();
     void lensfunDistAvailChanged();
     void customWbAvailChanged();
+    void colorAvailChanged();
+    void demosaicAvailChanged();
 
     //Copy/pasteing
     void pasteableChanged();
@@ -768,7 +907,38 @@ signals:
 
     //Demosaic
     void caEnabledChanged();
+    void demosaicMethodChanged();
+
+    void defCaEnabledChanged();
+    void defDemosaicMethodChanged();
+
+    //Postdemosaic
+    void temperatureChanged();
+    void tintChanged();
     void highlightsChanged();
+    void exposureCompChanged();
+
+    void defTemperatureChanged();
+    void defTintChanged();
+    void defHighlightsChanged();
+    void defExposureCompChanged();
+
+    //Noise Reduction
+    void nrEnabledChanged();
+    void nlClustersChanged();
+    void nlThreshChanged();
+    void nlStrengthChanged();
+    void impulseThreshChanged();
+    void chromaStrengthChanged();
+
+    void defNrEnabledChanged();
+    void defNlClustersChanged();
+    void defNlThreshChanged();
+    void defNlStrengthChanged();
+    void defImpulseThreshChanged();
+    void defChromaStrengthChanged();
+
+    //Prefilmulation
     void lensfunNameChanged();
     void lensfunCaChanged();
     void lensfunVignChanged();
@@ -777,8 +947,6 @@ signals:
     void rotationPointXChanged();
     void rotationPointYChanged();
 
-    void defCaEnabledChanged();
-    void defHighlightsChanged();
     void defLensfunNameChanged();
     void defLensfunCaChanged();
     void defLensfunVignChanged();
@@ -786,15 +954,6 @@ signals:
     void defRotationAngleChanged();
     void defRotationPointXChanged();
     void defRotationPointYChanged();
-
-    //Prefilmulation
-    void exposureCompChanged();
-    void temperatureChanged();
-    void tintChanged();
-
-    void defExposureCompChanged();
-    void defTemperatureChanged();
-    void defTintChanged();
 
     //Filmulation
     void initialDeveloperConcentrationChanged();
@@ -815,6 +974,7 @@ signals:
     void layerTimeDivisorChanged();
     void rolloffBoundaryChanged();
     void toeBoundaryChanged();
+    void highlightCrosstalkChanged();
 
     void defInitialDeveloperConcentrationChanged();
     void defReservoirThicknessChanged();
@@ -834,6 +994,7 @@ signals:
     void defLayerTimeDivisorChanged();
     void defRolloffBoundaryChanged();
     void defToeBoundaryChanged();
+    void defHighlightCrosstalkChanged();
 
     //Whitepoint & Blackpoint
     void blackpointChanged();

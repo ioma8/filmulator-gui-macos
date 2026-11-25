@@ -46,22 +46,44 @@ ParameterManager::ParameterManager() : QObject(0)
     customWbAvail = false;
 
     //initialize lensfun db
-    QDir dir = QDir::home();
     QString dirstr = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-    dirstr.append("/filmulator/version_2");
-    std::string stdstring = dirstr.toStdString();
-    cout << "ParamManager directory string: " << stdstring << endl;
+    dirstr.append("/filmulator/version_1/");
+    //cout << "ParamManager lensfun dirstring: " << dirstr.toStdString() << endl;
+    QDir dir(dirstr);
+    QStringList filters;
+    filters << "*.xml";
+    QFileInfoList fileList = dir.entryInfoList(filters, QDir::Files | QDir::NoDotAndDotDot);
 
-    cout << "ParamManager initializing lensfun db" << endl;
-    ldb = new lfDatabase();
+    //cout << "ParamManager initializing lensfun db" << endl;
+    ldb = lf_db_new();
     if (!ldb)
     {
-        cout << "Failed to create database!" << endl;
+        cout << "ParamManager lensfun failed to create database!" << endl;
     }
 
-    ldb->Load(stdstring.c_str());
-
-    cout << "ParamManager done initializing lensfun" << endl;
+    foreach (const QFileInfo &fileInfo, fileList) {
+        const QString filename = fileInfo.absoluteFilePath();
+        const std::string stdstring = filename.toStdString();
+        //cout << "ParamManager lensfun loading file " << stdstring << endl;
+        lfError loadError = ldb->Load(stdstring.c_str());
+        if (loadError == LF_WRONG_FORMAT)
+        {
+            cout << "ParamManager lensfun loading file " << stdstring << endl;
+            cout << "ParamManager lensfun database wrong format!" << endl;
+        }
+        else if (loadError == LF_NO_DATABASE)
+        {
+            cout << "ParamManager lensfun loading file " << stdstring << endl;
+            cout << "ParamManager lensfun no database found!" << endl;
+        }
+        else if (loadError == LF_NO_ERROR)
+        {
+            //cout << "ParamManager lensfun database loaded" << endl;
+        } else {
+            cout << "ParamManager lensfun loading file " << stdstring << endl;
+            cout << "ParamManager lensfun what happened? " << loadError << endl;
+        }
+    }
 
     validity = Valid::none;
 
@@ -186,15 +208,7 @@ std::tuple<Valid,AbortStatus,LoadParams,DemosaicParams> ParameterManager::claimD
 
     DemosaicParams demParams;
     demParams.caEnabled = s_caEnabled;
-    demParams.highlights = m_highlights;
-    demParams.cameraName = model;
-    demParams.lensName = s_lensfunName;//we use the staging ones because they're always populated
-    demParams.lensfunCA = s_lensfunCa >= 1;
-    demParams.lensfunVignetting = s_lensfunVign >= 1;
-    demParams.lensfunDistortion = s_lensfunDist >= 1;
-    demParams.focalLength = focalLength;
-    demParams.fnumber = fnumber;
-    demParams.rotationAngle = m_rotationAngle;
+    demParams.demosaicMethod = m_demosaicMethod;
     std::tuple<Valid,AbortStatus,LoadParams,DemosaicParams> tup(validity, abort, loadParams, demParams);
     return tup;
 }
@@ -244,116 +258,20 @@ void ParameterManager::setCaEnabled(int caEnabled)
     }
 }
 
-void ParameterManager::setHighlights(int highlights)
+void ParameterManager::setDemosaicMethod(int demosaicMethod)
 {
     if (!justInitialized)
     {
         QMutexLocker paramLocker(&paramMutex);
-        m_highlights = highlights;
+        m_demosaicMethod = demosaicMethod;
         validity = min(validity, Valid::load);
         paramLocker.unlock();
         QMutexLocker signalLocker(&signalMutex);
-        paramChangeWrapper(QString("setHighlights"));
+        paramChangeWrapper(QString("setDemosaicMethod"));
     }
 }
 
-//The lensfun parameters need staging params because when they're loaded from the
-// preferences or automatched, you *don't* want them to be written back to the database
-
-void ParameterManager::setLensfunName(QString lensName)
-{
-    if (!justInitialized)
-    {
-        QMutexLocker paramLocker(&paramMutex);
-        s_lensfunName = lensName;
-        m_lensfunName = lensName;
-        validity = min(validity, Valid::load);
-        paramLocker.unlock();
-        //We need to check what lens corrections are available based on the camera and lens
-        updateLensfunAvailability();
-        QMutexLocker signalLocker(&signalMutex);
-        paramChangeWrapper(QString("setLensfunName"));
-    }
-}
-
-void ParameterManager::setLensfunCa(int caEnabled)
-{
-    if (!justInitialized)
-    {
-        QMutexLocker paramLocker(&paramMutex);
-        s_lensfunCa = caEnabled;
-        m_lensfunCa = caEnabled;
-        validity = min(validity, Valid::load);
-        paramLocker.unlock();
-        QMutexLocker signalLocker(&signalMutex);
-        paramChangeWrapper(QString("setLensfunCa"));
-    }
-}
-
-void ParameterManager::setLensfunVign(int vignEnabled)
-{
-    if (!justInitialized)
-    {
-        QMutexLocker paramLocker(&paramMutex);
-        s_lensfunVign = vignEnabled;
-        m_lensfunVign = vignEnabled;
-        validity = min(validity, Valid::load);
-        paramLocker.unlock();
-        QMutexLocker signalLocker(&signalMutex);
-        paramChangeWrapper(QString("setLensfunVign"));
-    }
-}
-
-void ParameterManager::setLensfunDist(int distEnabled)
-{
-    if (!justInitialized)
-    {
-        QMutexLocker paramLocker(&paramMutex);
-        s_lensfunDist = distEnabled;
-        m_lensfunDist = distEnabled;
-        validity = min(validity, Valid::load);
-        paramLocker.unlock();
-        QMutexLocker signalLocker(&signalMutex);
-        paramChangeWrapper(QString("setLensfunDist"));
-    }
-}
-
-void ParameterManager::setRotationAngle(float angleIn)
-{
-    if (!justInitialized)
-    {
-        QMutexLocker paramLocker(&paramMutex);
-        m_rotationAngle = angleIn;
-        validity = min(validity, Valid::load);
-        paramLocker.unlock();
-        QMutexLocker signalLocker(&signalMutex);
-        paramChangeWrapper(QString("setRotationAngle"));
-    }
-}
-
-void ParameterManager::setRotationPointX(float rowIn)
-{
-    if (!justInitialized)
-    {
-        //no need to lock the paramMutex, since this doesn't affect the image at all
-        m_rotationPointX = rowIn;
-        QMutexLocker signalLocker(&signalMutex);
-        paramChangeWrapper(QString("setRotationPointX"));
-    }
-}
-
-void ParameterManager::setRotationPointY(float colIn)
-{
-    if (!justInitialized)
-    {
-        //no need to lock the paramMutex, since this doesn't affect the image at all
-        m_rotationPointY = colIn;
-        QMutexLocker signalLocker(&signalMutex);
-        paramChangeWrapper(QString("setRotationPointY"));
-    }
-}
-
-std::tuple<Valid,AbortStatus,PrefilmParams> ParameterManager::claimPrefilmParams()
+std::tuple<Valid,AbortStatus,PostDemosaicParams> ParameterManager::claimPostDemosaicParams()
 {
     QMutexLocker paramLocker(&paramMutex);
     AbortStatus abort;
@@ -368,22 +286,22 @@ std::tuple<Valid,AbortStatus,PrefilmParams> ParameterManager::claimPrefilmParams
     else
     {
         abort = AbortStatus::proceed;
-        validity = Valid::partprefilmulation;
+        validity = Valid::partpostdemosaic;
     }
     changeMadeSinceCheck = false;
-    PrefilmParams params;
+    PostDemosaicParams params;
+    params.highlights = m_highlights;
     params.exposureComp = m_exposureComp;
     params.temperature = m_temperature;
     params.tint = m_tint;
-    params.fullFilename = m_fullFilename;//it's okay to include previous things in later params if necessary
-    std::tuple<Valid,AbortStatus,PrefilmParams> tup(validity, abort, params);
+    std::tuple<Valid,AbortStatus,PostDemosaicParams> tup(validity, abort, params);
     return tup;
 }
 
-AbortStatus ParameterManager::claimPrefilmAbort()
+AbortStatus ParameterManager::claimPostDemosaicAbort()
 {
     QMutexLocker paramLocker(&paramMutex);
-    if (validity < Valid::partprefilmulation)
+    if (validity < Valid::partpostdemosaic)
     {
         changeMadeSinceCheck = false;
         return AbortStatus::restart;
@@ -395,20 +313,34 @@ AbortStatus ParameterManager::claimPrefilmAbort()
     }
     else
     {
-        changeMadeSinceCheck = false;
+        changeMadeSinceCheck = true;
         return AbortStatus::proceed;
     }
 }
 
-Valid ParameterManager::markPrefilmComplete()
+Valid ParameterManager::markPostDemosaicComplete()
 {
     QMutexLocker paramLocker(&paramMutex);
     processedYet = true;
-    if (Valid::partprefilmulation == validity)
+    if (Valid::partpostdemosaic == validity)
     {
-        validity = Valid::prefilmulation;
+        validity = Valid::postdemosaic;
     }
+
     return validity;
+}
+
+void ParameterManager::setHighlights(int highlights)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        m_highlights = highlights;
+        validity = min(validity, Valid::demosaic);
+        paramLocker.unlock();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setHighlights"));
+    }
 }
 
 void ParameterManager::setExposureComp(float exposureComp)
@@ -470,6 +402,425 @@ void ParameterManager::setWB(const float temp, const float tint)
     }
 }
 
+std::tuple<Valid,AbortStatus,NlmeansNRParams> ParameterManager::claimNlmeansNRParams()
+{
+    QMutexLocker paramLocker(&paramMutex);
+    AbortStatus abort;
+    if (validity < Valid::postdemosaic)
+    {
+        abort = AbortStatus::restart;
+    }
+    else if (changeMadeSinceCheck)
+    {
+        abort = AbortStatus::restart;
+    }
+    else
+    {
+        abort = AbortStatus::proceed;
+        validity = Valid::partnrnlmeans;
+    }
+    changeMadeSinceCheck = false;
+    NlmeansNRParams params;
+    params.nrEnabled = m_nrEnabled;
+    params.nlClusters = m_nlClusters;
+    params.nlThresh = m_nlThresh;
+    params.nlStrength = m_nlStrength;
+    std::tuple<Valid,AbortStatus,NlmeansNRParams> tup(validity, abort, params);
+    return tup;
+}
+
+std::tuple<Valid,AbortStatus,ImpulseNRParams> ParameterManager::claimImpulseNRParams()
+{
+    QMutexLocker paramLocker(&paramMutex);
+    AbortStatus abort;
+    if (validity < Valid::postdemosaic)
+    {
+        abort = AbortStatus::restart;
+    }
+    else if (changeMadeSinceCheck)
+    {
+        abort = AbortStatus::restart;
+    }
+    else
+    {
+        abort = AbortStatus::proceed;
+        validity = Valid::partnrimpulse;
+    }
+    changeMadeSinceCheck = false;
+    ImpulseNRParams params;
+    params.nrEnabled = m_nrEnabled;
+    params.impulseThresh = m_impulseThresh;
+    std::tuple<Valid,AbortStatus,ImpulseNRParams> tup(validity, abort, params);
+    return tup;
+}
+
+std::tuple<Valid,AbortStatus,ChromaNRParams> ParameterManager::claimChromaNRParams()
+{
+    QMutexLocker paramLocker(&paramMutex);
+    AbortStatus abort;
+    if (validity < Valid::postdemosaic)
+    {
+        abort = AbortStatus::restart;
+    }
+    else if (changeMadeSinceCheck)
+    {
+        abort = AbortStatus::restart;
+    }
+    else
+    {
+        abort = AbortStatus::proceed;
+        validity = Valid::partnrchroma;
+    }
+    changeMadeSinceCheck = false;
+    ChromaNRParams params;
+    params.nrEnabled = m_nrEnabled;
+    params.chromaStrength = m_chromaStrength;
+    std::tuple<Valid,AbortStatus,ChromaNRParams> tup(validity, abort, params);
+    return tup;
+}
+
+AbortStatus ParameterManager::claimNlmeansNRAbort()
+{
+    QMutexLocker paramLocker(&paramMutex);
+    if (validity < Valid::partnrnlmeans)
+    {
+        changeMadeSinceCheck = false;
+        return AbortStatus::restart;
+    }
+    else if (changeMadeSinceCheck)
+    {
+        changeMadeSinceCheck = false;
+        return AbortStatus::restart;
+    }
+    else
+    {
+        changeMadeSinceCheck = false;
+        return AbortStatus::proceed;
+    }
+}
+
+AbortStatus ParameterManager::claimImpulseNRAbort()
+{
+    QMutexLocker paramLocker(&paramMutex);
+    if (validity < Valid::nrimpulse)
+    {
+        changeMadeSinceCheck = false;
+        return AbortStatus::restart;
+    }
+    else if (changeMadeSinceCheck)
+    {
+        changeMadeSinceCheck = false;
+        return AbortStatus::restart;
+    }
+    else
+    {
+        changeMadeSinceCheck = false;
+        return AbortStatus::proceed;
+    }
+}
+
+AbortStatus ParameterManager::claimChromaNRAbort()
+{
+    QMutexLocker paramLocker(&paramMutex);
+    if (validity < Valid::nrchroma)
+    {
+        changeMadeSinceCheck = false;
+        return AbortStatus::restart;
+    }
+    else if (changeMadeSinceCheck)
+    {
+        changeMadeSinceCheck = false;
+        return AbortStatus::restart;
+    }
+    else
+    {
+        changeMadeSinceCheck = false;
+        return AbortStatus::proceed;
+    }
+}
+
+Valid ParameterManager::markNlmeansNRComplete()
+{
+    QMutexLocker paramLocker(&paramMutex);
+    processedYet = true;
+    if (Valid::partnrnlmeans == validity)
+    {
+        validity = Valid::nrnlmeans;
+    }
+    return validity;
+}
+
+Valid ParameterManager::markImpulseNRComplete()
+{
+    QMutexLocker paramLocker(&paramMutex);
+    processedYet = true;
+    if (Valid::partnrimpulse == validity)
+    {
+        validity = Valid::nrimpulse;
+    }
+    return validity;
+}
+
+Valid ParameterManager::markChromaNRComplete()
+{
+    QMutexLocker paramLocker(&paramMutex);
+    processedYet = true;
+    if (Valid::partnrchroma == validity)
+    {
+        validity = Valid::nrchroma;
+    }
+    return validity;
+}
+
+void ParameterManager::setNrEnabled(bool enabledIn)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        m_nrEnabled = enabledIn;
+        validity = min(validity, Valid::demosaic);
+        paramLocker.unlock();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setNrEnabled"));
+    }
+}
+
+void ParameterManager::setNlClusters(int numClusters)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        m_nlClusters = numClusters;
+        validity = min(validity, Valid::demosaic);
+        paramLocker.unlock();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setNlClusters"));
+    }
+}
+
+void ParameterManager::setNlThresh(float clusterThreshold)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        m_nlThresh = clusterThreshold;
+        validity = min(validity, Valid::demosaic);
+        paramLocker.unlock();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setNlThresh"));
+    }
+}
+
+void ParameterManager::setNlStrength(float strength)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        m_nlStrength = strength;
+        validity = min(validity, Valid::demosaic);
+        paramLocker.unlock();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setNlStrength"));
+    }
+}
+
+void ParameterManager::setImpulseThresh(float thresh)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        m_impulseThresh = thresh;
+        validity = min(validity, Valid::nrnlmeans);
+        paramLocker.unlock();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setImpulseThresh"));
+    }
+}
+
+void ParameterManager::setChromaStrength(float strength)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        m_chromaStrength = strength;
+        validity = min(validity, Valid::nrimpulse);
+        paramLocker.unlock();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setChromaStrength"));
+    }
+}
+
+std::tuple<Valid,AbortStatus,PrefilmParams> ParameterManager::claimPrefilmParams()
+{
+    QMutexLocker paramLocker(&paramMutex);
+    AbortStatus abort;
+    if (validity < Valid::nrchroma)
+    {
+        abort = AbortStatus::restart;
+    }
+    else if (changeMadeSinceCheck)
+    {
+        abort = AbortStatus::restart;
+    }
+    else
+    {
+        abort = AbortStatus::proceed;
+        validity = Valid::partprefilmulation;
+    }
+    changeMadeSinceCheck = false;
+    PrefilmParams params;
+    params.nrEnabled = m_nrEnabled;//it's okay to use previous things
+    params.cameraName = model;
+    params.lensName = s_lensfunName;//we use the staging ones because they're always populated
+    params.lensfunCA = s_lensfunCa >= 1;
+    params.lensfunVignetting = s_lensfunVign >= 1;
+    params.lensfunDistortion = s_lensfunDist >= 1;
+    params.focalLength = focalLength;
+    params.fnumber = fnumber;
+    params.rotationAngle = m_rotationAngle;
+    std::tuple<Valid,AbortStatus,PrefilmParams> tup(validity, abort, params);
+    return tup;
+}
+
+AbortStatus ParameterManager::claimPrefilmAbort()
+{
+    QMutexLocker paramLocker(&paramMutex);
+    if (validity < Valid::partprefilmulation)
+    {
+        changeMadeSinceCheck = false;
+        return AbortStatus::restart;
+    }
+    else if (changeMadeSinceCheck)
+    {
+        changeMadeSinceCheck = false;
+        return AbortStatus::restart;
+    }
+    else
+    {
+        changeMadeSinceCheck = false;
+        return AbortStatus::proceed;
+    }
+}
+
+Valid ParameterManager::markPrefilmComplete()
+{
+    QMutexLocker paramLocker(&paramMutex);
+    processedYet = true;
+    if (Valid::partprefilmulation == validity)
+    {
+        validity = Valid::prefilmulation;
+    }
+    return validity;
+}
+
+//The lensfun parameters need staging params because when they're loaded from the
+// preferences or automatched, you *don't* want them to be written back to the database
+
+void ParameterManager::setLensfunName(QString lensName)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        s_lensfunName = lensName;
+        m_lensfunName = lensName;
+        validity = min(validity, Valid::nrchroma);
+        paramLocker.unlock();
+        //We need to check what lens corrections are available based on the camera and lens
+        updateLensfunAvailability();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setLensfunName"));
+    }
+}
+
+void ParameterManager::setLensfunCa(int caEnabled)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        s_lensfunCa = caEnabled;
+        m_lensfunCa = caEnabled;
+        //We need to apply the s_lensfunName to m_lensfunName to make sure it gets applied
+        if (caEnabled > 0 && s_lensfunName != "") {
+            m_lensfunName = s_lensfunName;
+        }
+        validity = min(validity, Valid::nrchroma);
+        paramLocker.unlock();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setLensfunCa"));
+    }
+}
+
+void ParameterManager::setLensfunVign(int vignEnabled)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        s_lensfunVign = vignEnabled;
+        m_lensfunVign = vignEnabled;
+        //We need to apply the s_lensfunName to m_lensfunName to make sure it gets applied
+        if (vignEnabled > 0 && s_lensfunName != "") {
+            m_lensfunName = s_lensfunName;
+        }
+        validity = min(validity, Valid::nrchroma);
+        paramLocker.unlock();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setLensfunVign"));
+    }
+}
+
+void ParameterManager::setLensfunDist(int distEnabled)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        s_lensfunDist = distEnabled;
+        m_lensfunDist = distEnabled;
+        //We need to apply the s_lensfunName to m_lensfunName to make sure it gets applied
+        if (distEnabled > 0 && s_lensfunName != "") {
+            m_lensfunName = s_lensfunName;
+        }
+        validity = min(validity, Valid::nrchroma);
+        paramLocker.unlock();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setLensfunDist"));
+    }
+}
+
+void ParameterManager::setRotationAngle(float angleIn)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        m_rotationAngle = angleIn;
+        validity = min(validity, Valid::nrchroma);
+        paramLocker.unlock();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setRotationAngle"));
+    }
+}
+
+void ParameterManager::setRotationPointX(float rowIn)
+{
+    if (!justInitialized)
+    {
+        //no need to lock the paramMutex, since this doesn't affect the image at all
+        m_rotationPointX = rowIn;
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setRotationPointX"));
+    }
+}
+
+void ParameterManager::setRotationPointY(float colIn)
+{
+    if (!justInitialized)
+    {
+        //no need to lock the paramMutex, since this doesn't affect the image at all
+        m_rotationPointY = colIn;
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setRotationPointY"));
+    }
+}
+
 std::tuple<Valid,AbortStatus,FilmParams> ParameterManager::claimFilmParams()
 {
     QMutexLocker paramLocker(&paramMutex);
@@ -509,6 +860,7 @@ std::tuple<Valid,AbortStatus,FilmParams> ParameterManager::claimFilmParams()
     params.layerTimeDivisor = m_layerTimeDivisor;
     params.rolloffBoundary = m_rolloffBoundary;
     params.toeBoundary = m_toeBoundary;
+    params.highlightCrosstalk = m_highlightCrosstalk;
     std::tuple<Valid,AbortStatus,FilmParams> tup(validity,abort, params);
     return tup;
 }
@@ -775,6 +1127,19 @@ void ParameterManager::setToeBoundary(float toeBoundary)
         paramLocker.unlock();
         QMutexLocker signalLocker(&signalMutex);
         paramChangeWrapper(QString("setToeBoundary"));
+    }
+}
+
+void ParameterManager::setHighlightCrosstalk(float highlightCrosstalk)
+{
+    if (!justInitialized)
+    {
+        QMutexLocker paramLocker(&paramMutex);
+        m_highlightCrosstalk = highlightCrosstalk;
+        validity = min(validity, Valid::prefilmulation);
+        paramLocker.unlock();
+        QMutexLocker signalLocker(&signalMutex);
+        paramChangeWrapper(QString("setHighlightCrosstalk"));
     }
 }
 
@@ -1244,57 +1609,65 @@ void ParameterManager::writeToDB(QString imageID)
     QSqlQuery query(db);
     query.exec("BEGIN;");//Stick these all into one db action for speed.
     query.prepare("REPLACE INTO ProcessingTable ("
-                  "ProcTprocID, "                         // 0
-                  "ProcTinitialDeveloperConcentration, "  // 1
-                  "ProcTreservoirThickness, "             // 2
-                  "ProcTactiveLayerThickness, "           // 3
-                  "ProcTcrystalsPerPixel, "               // 4
-                  "ProcTinitialCrystalRadius, "           // 5
-                  "ProcTinitialSilverSaltDensity, "       // 6
-                  "ProcTdeveloperConsumptionConst, "      // 7
-                  "ProcTcrystalGrowthConst, "             // 8
-                  "ProcTsilverSaltConsumptionConst, "     // 9
-                  "ProcTtotalDevelopmentTime, "           //10
-                  "ProcTagitateCount, "                   //11
-                  "ProcTdevelopmentSteps, "               //12
-                  "ProcTfilmArea, "                       //13
-                  "ProcTsigmaConst, "                     //14
-                  "ProcTlayerMixConst, "                  //15
-                  "ProcTlayerTimeDivisor, "               //16
-                  "ProcTrolloffBoundary, "                //17
-                  "ProcTexposureComp, "                   //18
-                  "ProcTwhitepoint, "                     //19
-                  "ProcTblackpoint, "                     //20
-                  "ProcTshadowsX, "                       //21
-                  "ProcTshadowsY, "                       //22
-                  "ProcThighlightsX, "                    //23
-                  "ProcThighlightsY, "                    //24
-                  "ProcThighlightRecovery, "              //25
-                  "ProcTcaEnabled, "                      //26
-                  "ProcTtemperature, "                    //27
-                  "ProcTtint, "                           //28
-                  "ProcTvibrance, "                       //29
-                  "ProcTsaturation, "                     //30
-                  "ProcTrotation, "                       //31
-                  "ProcTcropHeight, "                     //32
-                  "ProcTcropAspect, "                     //33
-                  "ProcTcropVoffset, "                    //34
-                  "ProcTcropHoffset, "                    //35
-                  "ProcTmonochrome, "                     //36
-                  "ProcTbwRmult, "                        //37
-                  "ProcTbwGmult, "                        //38
-                  "ProcTbwBmult, "                        //39
-                  "ProcTtoeBoundary, "                    //40
-                  "ProcTlensfunName, "                    //41
-                  "ProcTlensfunCa, "                      //42
-                  "ProcTlensfunVign, "                    //43
-                  "ProcTlensfunDist, "                    //44
-                  "ProcTrotationAngle, "                  //45
-                  "ProcTrotationPointX, "                 //46
-                  "ProcTrotationPointY) "                 //47
-                  " values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);");
-                  //                            1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 3 3 3 3 3 3 3 3 3 3 4 4 4 4 4 4 4 4
-                  //        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7
+                  "ProcTprocID"                          // 0
+                  ",ProcTinitialDeveloperConcentration"  // 1
+                  ",ProcTreservoirThickness"             // 2
+                  ",ProcTactiveLayerThickness"           // 3
+                  ",ProcTcrystalsPerPixel"               // 4
+                  ",ProcTinitialCrystalRadius"           // 5
+                  ",ProcTinitialSilverSaltDensity"       // 6
+                  ",ProcTdeveloperConsumptionConst"      // 7
+                  ",ProcTcrystalGrowthConst"             // 8
+                  ",ProcTsilverSaltConsumptionConst"     // 9
+                  ",ProcTtotalDevelopmentTime"           //10
+                  ",ProcTagitateCount"                   //11
+                  ",ProcTdevelopmentSteps"               //12
+                  ",ProcTfilmArea"                       //13
+                  ",ProcTsigmaConst"                     //14
+                  ",ProcTlayerMixConst"                  //15
+                  ",ProcTlayerTimeDivisor"               //16
+                  ",ProcTrolloffBoundary"                //17
+                  ",ProcTexposureComp"                   //18
+                  ",ProcTwhitepoint"                     //19
+                  ",ProcTblackpoint"                     //20
+                  ",ProcTshadowsX"                       //21
+                  ",ProcTshadowsY"                       //22
+                  ",ProcThighlightsX"                    //23
+                  ",ProcThighlightsY"                    //24
+                  ",ProcThighlightRecovery"              //25
+                  ",ProcTcaEnabled"                      //26
+                  ",ProcTtemperature"                    //27
+                  ",ProcTtint"                           //28
+                  ",ProcTvibrance"                       //29
+                  ",ProcTsaturation"                     //30
+                  ",ProcTrotation"                       //31
+                  ",ProcTcropHeight"                     //32
+                  ",ProcTcropAspect"                     //33
+                  ",ProcTcropVoffset"                    //34
+                  ",ProcTcropHoffset"                    //35
+                  ",ProcTmonochrome"                     //36
+                  ",ProcTbwRmult"                        //37
+                  ",ProcTbwGmult"                        //38
+                  ",ProcTbwBmult"                        //39
+                  ",ProcTtoeBoundary"                    //40
+                  ",ProcTlensfunName"                    //41
+                  ",ProcTlensfunCa"                      //42
+                  ",ProcTlensfunVign"                    //43
+                  ",ProcTlensfunDist"                    //44
+                  ",ProcTrotationAngle"                  //45
+                  ",ProcTrotationPointX"                 //46
+                  ",ProcTrotationPointY"                 //47
+                  ",ProcTdemosaicMethod"                 //48
+                  ",ProcTnrEnabled"                      //49
+                  ",ProcTnlClusters"                     //50
+                  ",ProcTnlThresh"                       //51
+                  ",ProcTnlStrength"                     //52
+                  ",ProcTimpulseThresh"                  //53
+                  ",ProcTchromaStrength"                 //54
+                  ",ProcThighlightCrosstalk"             //55
+                  ") values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);");
+                  //                             1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 3 3 3 3 3 3 3 3 3 3 4 4 4 4 4 4 4 4 4 4 5 5 5 5 5 5
+                  //         0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
     query.bindValue( 0, imageID);
     query.bindValue( 1, m_initialDeveloperConcentration);
     query.bindValue( 2, m_reservoirThickness);
@@ -1343,6 +1716,14 @@ void ParameterManager::writeToDB(QString imageID)
     query.bindValue(45, m_rotationAngle);
     query.bindValue(46, m_rotationPointX);
     query.bindValue(47, m_rotationPointY);
+    query.bindValue(48, m_demosaicMethod);
+    query.bindValue(49, m_nrEnabled);
+    query.bindValue(50, m_nlClusters);
+    query.bindValue(51, m_nlThresh);
+    query.bindValue(52, m_nlStrength);
+    query.bindValue(53, m_impulseThresh);
+    query.bindValue(54, m_chromaStrength);
+    query.bindValue(55, m_highlightCrosstalk);
     query.exec();
     //Write that it's been edited to the SearchTable (actually writing the edit time)
     QDateTime now = QDateTime::currentDateTime();
@@ -1388,6 +1769,7 @@ void ParameterManager::selectImage(const QString imageID)
             validityWhenCanceled = Valid::none;
         }
         validity = Valid::none;
+
         emit imageIndexChanged();
     }
 
@@ -1531,7 +1913,7 @@ void ParameterManager::selectImage(const QString imageID)
     const bool hasPreferences = (query.value(0).toInt() > 0);
     if (hasPreferences)
     {
-        //cout << "Has lens preferences" << endl;
+        cout << "parameterManager Has lens preferences" << endl;
         query.prepare("SELECT LensfunLens, LensfunCa, LensfunVign, LensfunDist, AutoCa FROM LensPrefs  WHERE ExifCamera = ? AND ExifLens = ?;");
         query.bindValue(0, model);
         query.bindValue(1, exifLensName);
@@ -1566,7 +1948,7 @@ void ParameterManager::selectImage(const QString imageID)
         s_caEnabled = d_caEnabled;
     } else {
         //No preferences
-        //cout << "Has no lens preferences" << endl;
+        cout << "parameterManager Has no lens preferences" << endl;
         //If there's a match for the exif lens, use that
         d_lensfunName = identifyLens(m_fullFilename);
         s_lensfunName = d_lensfunName;
@@ -1581,16 +1963,21 @@ void ParameterManager::selectImage(const QString imageID)
         d_lensfunDist = 0;
         s_lensfunDist = 0;
     }
+    cout << "parameterManager m_lensfunName: " << m_lensfunName.toStdString() << endl;
+    cout << "parameterManager s_lensfunName: " << s_lensfunName.toStdString() << endl;
 
-    //Now, if the m_ params are set, we overwrite the s_ params accordingly
-    if (m_lensfunName != "NoLens")
+    //Now, if the m_ params are set, we overwrite the preferred settings in the s_ params accordingly
+    if (m_caEnabled > -1)
     {
+        s_caEnabled = m_caEnabled;//happens regardless of what else happens
+    }
+
+    if (m_lensfunName != "NoLens" && m_lensfunName != "")
+    {
+        //If the settings from the database have a lens saved,
+        //then we need to copy the valid m_ parameters to the s_parameters for processing
         s_lensfunName = m_lensfunName;
-        //cout << "Lens was in database: " << s_lensfunName.toStdString() << endl;
-        if (m_caEnabled > -1)
-        {
-            s_caEnabled = m_caEnabled;
-        }
+        cout << "Lens was in database: " << s_lensfunName.toStdString() << endl;
         if (m_lensfunCa > -1)
         {
             s_lensfunCa = m_lensfunCa;
@@ -1604,16 +1991,31 @@ void ParameterManager::selectImage(const QString imageID)
             s_lensfunDist = m_lensfunDist;
         }
     } else {
-        //If there's no matching lens, disable all the lensfun corrections.
-        //cout << "No lens found" << endl;
-        //s_caEnabled needs to be changed to whatever the database said though.
-        if (m_caEnabled > -1)
+        //The database doesn't have a lens model set.
+
+        if (s_lensfunName == "")
         {
-            s_caEnabled = m_caEnabled;
+            //If lensfun can't automatically find a matching lens, disable lensfun corrections.
+            cout << "parameterManager No lens found" << endl;
+            s_lensfunCa = 0;
+            s_lensfunVign = 0;
+            s_lensfunDist = 0;
+            //We also set the database ones to zero if they were turned on
+            if (m_lensfunCa > 0)
+            {
+                m_lensfunCa = 0;
+            }
+            if (m_lensfunVign > 0)
+            {
+                m_lensfunVign = 0;
+            }
+            if (m_lensfunDist > 0)
+            {
+                m_lensfunDist = 0;
+            }
+        } else {
+            //If lensfun did find a matching lens, all the s_parameters should be set already
         }
-        s_lensfunCa = 0;
-        s_lensfunVign = 0;
-        s_lensfunDist = 0;
     }
     //cout << "Default lens: " << d_lensfunName.toStdString() << endl;
 
@@ -1651,7 +2053,45 @@ void ParameterManager::selectImage(const QString imageID)
     }
     bool isXtrans = maxXtrans > 0;
     //cout << "Is xtrans: " << isXtrans << endl;
-    autoCaAvail = !isSraw && !isWeird && !isXtrans;
+
+    //Check if sensor is monochrome
+    //Monochrome images make some tools useless
+    const bool isCR3 = fullFilenameQstr.endsWith(".cr3", Qt::CaseInsensitive);
+    const bool isDNG = fullFilenameQstr.endsWith(".dng", Qt::CaseInsensitive);
+    isMonochrome = false;
+    if (!isCR3) //no CR3 cameras are monochrome
+    {
+        if (isDNG) {
+            libraw->unpack();
+            int dngProfile = 1;
+            if(daylightScore(libraw->imgdata.color.dng_color[0].illuminant) <
+               daylightScore(libraw->imgdata.color.dng_color[1].illuminant)) {
+                dngProfile = 0;
+            }
+            const float rr_cam_xyz = libraw->imgdata.color.dng_color[dngProfile].colormatrix[0][0];
+            isMonochrome = abs(rr_cam_xyz) < 0.1f;
+            colorAvail = !isMonochrome;
+            emit colorAvailChanged();
+        } else {
+            cout << "updateAvailability exiv filename: " << m_fullFilename << endl;
+            auto exifImage = Exiv2::ImageFactory::open(m_fullFilename);
+            exifImage->readMetadata();
+            Exiv2::ExifData exifData = exifImage->exifData();
+            std::string wb = exifData["Exif.Photo.WhiteBalance"].toString();
+            isMonochrome = wb.length()==0;
+            colorAvail = !isMonochrome;
+            emit colorAvailChanged();
+        }
+    } else {
+        isMonochrome = false;
+        colorAvail = true;
+        emit colorAvailChanged();
+    }
+    isSraw = isSraw || (isWeird && !isMonochrome);
+    demosaicAvail = !isSraw && !isWeird && !isMonochrome;
+    emit demosaicAvailChanged();
+
+    autoCaAvail = !isSraw && !isWeird && !isXtrans && !isMonochrome;
     //cout << "Auto CA is available: " << autoCaAvail << endl;
     emit autoCaAvailChanged();
 
@@ -1664,6 +2104,7 @@ void ParameterManager::selectImage(const QString imageID)
     paramLocker.unlock();
 
     //Emit that the things have changed.
+    emit demosaicMethodChanged();
     emit caEnabledChanged();
     emit highlightsChanged();
     emit lensfunNameChanged();
@@ -1673,6 +2114,11 @@ void ParameterManager::selectImage(const QString imageID)
     emit rotationAngleChanged();
     emit rotationPointXChanged();
     emit rotationPointYChanged();
+    emit nrEnabledChanged();
+    emit nlClustersChanged();
+    emit nlThreshChanged();
+    emit nlStrengthChanged();
+    emit chromaStrengthChanged();
     emit exposureCompChanged();
     emit temperatureChanged();
     emit tintChanged();
@@ -1711,7 +2157,9 @@ void ParameterManager::selectImage(const QString imageID)
     emit bwGmultChanged();
     emit bwBmultChanged();
     emit toeBoundaryChanged();
+    emit highlightCrosstalkChanged();
 
+    emit defDemosaicMethodChanged();
     emit defCaEnabledChanged();
     emit defHighlightsChanged();
     emit defLensfunNameChanged();
@@ -1721,6 +2169,11 @@ void ParameterManager::selectImage(const QString imageID)
     emit defRotationAngleChanged();
     emit defRotationPointXChanged();
     emit defRotationPointYChanged();
+    emit defNrEnabledChanged();
+    emit defNlClustersChanged();
+    emit defNlThreshChanged();
+    emit defNlStrengthChanged();
+    emit defChromaStrengthChanged();
     emit defExposureCompChanged();
     emit defTemperatureChanged();
     emit defTintChanged();
@@ -1754,6 +2207,7 @@ void ParameterManager::selectImage(const QString imageID)
     emit defBwGmultChanged();
     emit defBwBmultChanged();
     emit defToeBoundaryChanged();
+    emit defHighlightCrosstalkChanged();
 
     //Mark that it's safe for sliders to move again.
     QMutexLocker signalLocker(&signalMutex);
@@ -1799,6 +2253,16 @@ void ParameterManager::loadDefaults(const CopyDefaults copyDefaults, const std::
         m_caEnabled = query.value(nameCol).toInt();
     }
 
+    //Demosaic algorithm
+    nameCol = rec.indexOf("ProfTdemosaicMethod");
+    if (-1 == nameCol) { std::cout << "paramManager ProfTdemosaicMethod" << endl; }
+    const int temp_demosaicMethod = query.value(nameCol).toInt();
+    d_demosaicMethod = temp_demosaicMethod;
+    if (copyDefaults == CopyDefaults::loadToParams)
+    {
+        m_demosaicMethod = temp_demosaicMethod;
+    }
+
     //Highlights (highlight recovery)
     nameCol = rec.indexOf("ProfThighlightRecovery");
     if (-1 == nameCol) { std::cout << "paramManager ProfThighlightRecovery" << endl; }
@@ -1807,6 +2271,66 @@ void ParameterManager::loadDefaults(const CopyDefaults copyDefaults, const std::
     if (copyDefaults == CopyDefaults::loadToParams)
     {
         m_highlights = temp_highlights;
+    }
+
+    //Exposure compensation
+    nameCol = rec.indexOf("ProfTexposureComp");
+    if (-1 == nameCol) { std::cout << "paramManager ProfTexposureComp" << endl; }
+    const float temp_exposureComp = query.value(nameCol).toFloat();
+    d_exposureComp = temp_exposureComp;
+    if (copyDefaults == CopyDefaults::loadToParams)
+    {
+        m_exposureComp = temp_exposureComp;
+    }
+
+    //noise reduction stuff
+    nameCol = rec.indexOf("ProfTnrEnabled");
+    if (-1 == nameCol) { std::cout << "paramManager ProfTnrEnabled" << endl; }
+    const int temp_nrEnabled = query.value(nameCol).toInt();
+    d_nrEnabled = temp_nrEnabled;
+    if (copyDefaults == CopyDefaults::loadToParams)
+    {
+        m_nrEnabled = temp_nrEnabled;
+    }
+    nameCol = rec.indexOf("ProfTnlClusters");
+    if (-1 == nameCol) { std::cout << "paramManager ProfTnlClusters" << endl; }
+    const int temp_nlClusters = query.value(nameCol).toInt();
+    d_nlClusters = temp_nlClusters;
+    if (copyDefaults == CopyDefaults::loadToParams)
+    {
+        m_nlClusters = temp_nlClusters;
+    }
+    nameCol = rec.indexOf("ProfTnlThresh");
+    if (-1 == nameCol) { std::cout << "paramManager ProfTnlThresh" << endl; }
+    const float temp_nlThresh = query.value(nameCol).toFloat();
+    d_nlThresh = temp_nlThresh;
+    if (copyDefaults == CopyDefaults::loadToParams)
+    {
+        m_nlThresh = temp_nlThresh;
+    }
+    nameCol = rec.indexOf("ProfTnlStrength");
+    if (-1 == nameCol) { std::cout << "paramManager ProfTnlStrength" << endl; }
+    const float temp_nlStrength = query.value(nameCol).toFloat();
+    d_nlStrength = temp_nlStrength;
+    if (copyDefaults == CopyDefaults::loadToParams)
+    {
+        m_nlStrength = temp_nlStrength;
+    }
+    nameCol = rec.indexOf("ProfTimpulseThresh");
+    if (-1 == nameCol) { std::cout << "paramManager ProfTimpulseThresh" << endl; }
+    const float temp_impulseThresh = query.value(nameCol).toFloat();
+    d_impulseThresh = temp_impulseThresh;
+    if (copyDefaults == CopyDefaults::loadToParams)
+    {
+        m_impulseThresh = temp_impulseThresh;
+    }
+    nameCol = rec.indexOf("ProfTchromaStrength");
+    if (-1 == nameCol) { std::cout << "paramManager ProfTchromaStrength" << endl; }
+    const float temp_chromaStrength = query.value(nameCol).toFloat();
+    d_chromaStrength = temp_chromaStrength;
+    if (copyDefaults == CopyDefaults::loadToParams)
+    {
+        m_chromaStrength = temp_chromaStrength;
     }
 
     //The lens correction parameters don't actually have the defaults loaded into the d_ params.
@@ -1862,16 +2386,6 @@ void ParameterManager::loadDefaults(const CopyDefaults copyDefaults, const std::
     if (copyDefaults == CopyDefaults::loadToParams)
     {
         m_rotationPointY = temp_rotationPointY;
-    }
-
-    //Exposure compensation
-    nameCol = rec.indexOf("ProfTexposureComp");
-    if (-1 == nameCol) { std::cout << "paramManager ProfTexposureComp" << endl; }
-    const float temp_exposureComp = query.value(nameCol).toFloat();
-    d_exposureComp = temp_exposureComp;
-    if (copyDefaults == CopyDefaults::loadToParams)
-    {
-        m_exposureComp = temp_exposureComp;
     }
 
     if ("" == filename)
@@ -2084,6 +2598,16 @@ void ParameterManager::loadDefaults(const CopyDefaults copyDefaults, const std::
         m_toeBoundary = temp_toeBoundary;
     }
 
+    //Highlight crosstalk. This controls the desaturation of highlights.
+    nameCol = rec.indexOf("ProfThighlightCrosstalk");
+    if (-1 == nameCol) { std::cout << "paramManager ProfThighlightCrosstalk" << endl; }
+    const float temp_highlightCrosstalk = query.value(nameCol).toFloat();
+    d_highlightCrosstalk = temp_highlightCrosstalk;
+    if (copyDefaults == CopyDefaults::loadToParams)
+    {
+        m_highlightCrosstalk = temp_highlightCrosstalk;
+    }
+
     //Post-filmulator black clipping point
     nameCol = rec.indexOf("ProfTblackpoint");
     if (-1 == nameCol) { std::cout << "paramManager ProfTblackpoint" << endl; }
@@ -2276,6 +2800,17 @@ void ParameterManager::loadParams(QString imageID)
         validity = min(validity, Valid::load);
     }
 
+    //Demosaic stuff
+    nameCol = rec.indexOf("ProcTdemosaicMethod");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTdemosaicMethod" << endl; }
+    const int temp_demosaicMethod = query.value(nameCol).toInt();
+    if (temp_demosaicMethod != m_demosaicMethod)
+    {
+        m_demosaicMethod = temp_demosaicMethod;
+        std::cout << "demosaicMethod read as: " << m_demosaicMethod << endl;
+        validity = min(validity, Valid::load);
+    }
+
     //highlights (highlight recovery)
     nameCol = rec.indexOf("ProcThighlightRecovery");
     if (-1 == nameCol) { std::cout << "paramManager ProcThighlightRecovery" << endl; }
@@ -2284,82 +2819,7 @@ void ParameterManager::loadParams(QString imageID)
     {
         //cout << "ParameterManager::loadParams highlights" << endl;
         m_highlights = temp_highlights;
-        validity = min(validity, Valid::load);
-    }
-
-    //Lensfun lens name
-    nameCol = rec.indexOf("ProcTlensfunName");
-    if (-1 == nameCol) { std::cout << "paramManager ProcTlensfunName" << endl; }
-    const QString temp_lensfunName = query.value(nameCol).toString();
-    if (temp_lensfunName != m_lensfunName)
-    {
-        //cout << "ParameterManager::loadParams lensfunName" << endl;
-        m_lensfunName = temp_lensfunName;
-        validity = min(validity, Valid::load);
-    }
-
-    //Lensfun CA correction
-    nameCol = rec.indexOf("ProcTlensfunCa");
-    if (-1 == nameCol) { std::cout << "paramManager ProcTlensfunCa" << endl; }
-    const int temp_lensfunCa = query.value(nameCol).toInt();
-    if (temp_lensfunCa != m_lensfunCa)
-    {
-        //cout << "ParameterManager::loadParams lensfunCa" << endl;
-        m_lensfunCa = temp_lensfunCa;
-        validity = min(validity, Valid::load);
-    }
-
-    //Lensfun vignetting correction
-    nameCol = rec.indexOf("ProcTlensfunVign");
-    if (-1 == nameCol) { std::cout << "paramManager ProcTlensfunVign" << endl; }
-    const int temp_lensfunVign = query.value(nameCol).toInt();
-    if (temp_lensfunVign != m_lensfunVign)
-    {
-        //cout << "ParameterManager::loadParams lensfunVign" << endl;
-        m_lensfunVign = temp_lensfunVign;
-        validity = min(validity, Valid::load);
-    }
-
-    //Lensfun distortion correction
-    nameCol = rec.indexOf("ProcTlensfunDist");
-    if (-1 == nameCol) { std::cout << "paramManager ProcTlensfunDist" << endl; }
-    const int temp_lensfunDist = query.value(nameCol).toInt();
-    if (temp_lensfunDist != m_lensfunDist)
-    {
-        //cout << "ParameterManager::loadParams lensfunDist" << endl;
-        m_lensfunDist = temp_lensfunDist;
-        validity = min(validity, Valid::load);
-    }
-
-    //Fine rotation angle
-    nameCol = rec.indexOf("ProcTrotationAngle");
-    if (-1 == nameCol) { std::cout << "paramManager ProcTrotationAngle" << endl; }
-    const float temp_rotationAngle = query.value(nameCol).toFloat();
-    if (temp_rotationAngle != m_rotationAngle)
-    {
-        //cout << "ParameterManager::loadParams rotationAngle" << endl;
-        m_rotationAngle = temp_rotationAngle;
-        validity = min(validity, Valid::load);
-    }
-
-    //Rotation reference point coordinates
-    nameCol = rec.indexOf("ProcTrotationPointX");
-    if (-1 == nameCol) { std::cout << "paramManager ProcTrotationPointX" << endl; }
-    const float temp_rotationPointX = query.value(nameCol).toFloat();
-    if (temp_rotationPointX != m_rotationPointX)
-    {
-        //cout << "ParameterManager::loadParams rotationPointX" << endl;
-        m_rotationPointX = temp_rotationPointX;
-        //the reference coordinates don't affect validity at all
-    }
-    nameCol = rec.indexOf("ProcTrotationPointY");
-    if (-1 == nameCol) { std::cout << "paramManager ProcTrotationPointY" << endl; }
-    const float temp_rotationPointY = query.value(nameCol).toFloat();
-    if (temp_rotationPointY != m_rotationPointY)
-    {
-        //cout << "ParameterManager::loadParams rotationPointY" << endl;
-        m_rotationPointY = temp_rotationPointY;
-        //the reference coordinates don't affect validity at all
+        validity = min(validity, Valid::demosaic);
     }
 
     //Exposure compensation
@@ -2393,6 +2853,131 @@ void ParameterManager::loadParams(QString imageID)
         //cout << "ParameterManager::loadParams tint" << endl;
         m_tint = temp_tint;
         validity = min(validity, Valid::demosaic);
+    }
+
+    //Noise reduction stuff
+    nameCol = rec.indexOf("ProcTnrEnabled");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTnrEnabled" << endl; }
+    const int temp_nrEnabled = query.value(nameCol).toInt();
+    if (temp_nrEnabled != m_nrEnabled)
+    {
+        m_nrEnabled = temp_nrEnabled;
+        validity = min(validity, Valid::postdemosaic);
+    }
+    nameCol = rec.indexOf("ProcTnlClusters");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTnlClusters" << endl; }
+    const int temp_nlClusters = query.value(nameCol).toInt();
+    if (temp_nlClusters != m_nlClusters)
+    {
+        m_nlClusters = temp_nlClusters;
+        validity = min(validity, Valid::postdemosaic);
+    }
+    nameCol = rec.indexOf("ProcTnlThresh");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTnlThresh" << endl; }
+    const float temp_nlThresh = query.value(nameCol).toFloat();
+    if (temp_nlThresh != m_nlThresh)
+    {
+        m_nlThresh = temp_nlThresh;
+        validity = min(validity, Valid::postdemosaic);
+    }
+    nameCol = rec.indexOf("ProcTnlStrength");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTnlStrength" << endl; }
+    const float temp_nlStrength = query.value(nameCol).toFloat();
+    if (temp_nlStrength != m_nlStrength)
+    {
+        m_nlStrength = temp_nlStrength;
+        validity = min(validity, Valid::postdemosaic);
+    }
+    nameCol = rec.indexOf("ProcTimpulseThresh");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTimpulseThresh" << endl; }
+    const float temp_impulseThresh = query.value(nameCol).toFloat();
+    if (temp_impulseThresh != m_impulseThresh)
+    {
+        m_impulseThresh = temp_impulseThresh;
+        validity = min(validity, Valid::nrnlmeans);
+    }
+    nameCol = rec.indexOf("ProcTchromaStrength");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTchromaStrength" << endl; }
+    const float temp_chromaStrength = query.value(nameCol).toFloat();
+    if (temp_chromaStrength != m_chromaStrength)
+    {
+        m_chromaStrength = temp_chromaStrength;
+        validity = min(validity, Valid::nrimpulse);
+    }
+
+    //Lensfun lens name
+    nameCol = rec.indexOf("ProcTlensfunName");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTlensfunName" << endl; }
+    const QString temp_lensfunName = query.value(nameCol).toString();
+    if (temp_lensfunName != m_lensfunName)
+    {
+        //cout << "ParameterManager::loadParams lensfunName" << endl;
+        m_lensfunName = temp_lensfunName;
+        validity = min(validity, Valid::nrchroma);
+    }
+
+    //Lensfun CA correction
+    nameCol = rec.indexOf("ProcTlensfunCa");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTlensfunCa" << endl; }
+    const int temp_lensfunCa = query.value(nameCol).toInt();
+    if (temp_lensfunCa != m_lensfunCa)
+    {
+        //cout << "ParameterManager::loadParams lensfunCa" << endl;
+        m_lensfunCa = temp_lensfunCa;
+        validity = min(validity, Valid::nrchroma);
+    }
+
+    //Lensfun vignetting correction
+    nameCol = rec.indexOf("ProcTlensfunVign");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTlensfunVign" << endl; }
+    const int temp_lensfunVign = query.value(nameCol).toInt();
+    if (temp_lensfunVign != m_lensfunVign)
+    {
+        //cout << "ParameterManager::loadParams lensfunVign" << endl;
+        m_lensfunVign = temp_lensfunVign;
+        validity = min(validity, Valid::nrchroma);
+    }
+
+    //Lensfun distortion correction
+    nameCol = rec.indexOf("ProcTlensfunDist");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTlensfunDist" << endl; }
+    const int temp_lensfunDist = query.value(nameCol).toInt();
+    if (temp_lensfunDist != m_lensfunDist)
+    {
+        //cout << "ParameterManager::loadParams lensfunDist" << endl;
+        m_lensfunDist = temp_lensfunDist;
+        validity = min(validity, Valid::nrchroma);
+    }
+
+    //Fine rotation angle
+    nameCol = rec.indexOf("ProcTrotationAngle");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTrotationAngle" << endl; }
+    const float temp_rotationAngle = query.value(nameCol).toFloat();
+    if (temp_rotationAngle != m_rotationAngle)
+    {
+        //cout << "ParameterManager::loadParams rotationAngle" << endl;
+        m_rotationAngle = temp_rotationAngle;
+        validity = min(validity, Valid::nrchroma);
+    }
+
+    //Rotation reference point coordinates
+    nameCol = rec.indexOf("ProcTrotationPointX");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTrotationPointX" << endl; }
+    const float temp_rotationPointX = query.value(nameCol).toFloat();
+    if (temp_rotationPointX != m_rotationPointX)
+    {
+        //cout << "ParameterManager::loadParams rotationPointX" << endl;
+        m_rotationPointX = temp_rotationPointX;
+        //the reference coordinates don't affect validity at all
+    }
+    nameCol = rec.indexOf("ProcTrotationPointY");
+    if (-1 == nameCol) { std::cout << "paramManager ProcTrotationPointY" << endl; }
+    const float temp_rotationPointY = query.value(nameCol).toFloat();
+    if (temp_rotationPointY != m_rotationPointY)
+    {
+        //cout << "ParameterManager::loadParams rotationPointY" << endl;
+        m_rotationPointY = temp_rotationPointY;
+        //the reference coordinates don't affect validity at all
     }
 
     //Initial developer concentration
@@ -2590,6 +3175,17 @@ void ParameterManager::loadParams(QString imageID)
     {
         //cout << "ParameterManager::loadParams toeBoundary" << endl;
         m_toeBoundary = temp_toeBoundary;
+        validity = min(validity, Valid::prefilmulation);
+    }
+
+    //Highlight crosstalk. This controls the desaturation of highlights.
+    nameCol = rec.indexOf("ProcThighlightCrosstalk");
+    if (-1 == nameCol) { std::cout << "paramManager ProcThighlightCrosstalk" << endl; }
+    const float temp_highlightCrosstalk = query.value(nameCol).toFloat();
+    if ( temp_highlightCrosstalk != m_highlightCrosstalk)
+    {
+        //cout << "ParameterManager::loadParams highlightCrosstalk" << endl;
+        m_highlightCrosstalk = temp_highlightCrosstalk;
         validity = min(validity, Valid::prefilmulation);
     }
 
@@ -2930,74 +3526,22 @@ void ParameterManager::cloneParams(ParameterManager * sourceParams)
         validity = min(validity, Valid::load);
     }
 
+    //Demosaic method
+    const int temp_demosaicMethod = sourceParams->getDemosaicMethod();
+    if (temp_demosaicMethod != m_demosaicMethod)
+    {
+        //cout << "ParameterManager::cloneParams demosaicMethod" << endl;
+        m_demosaicMethod = temp_demosaicMethod;
+        validity = min(validity, Valid::load);
+    }
+
     //Highlight recovery
     const int temp_highlights = sourceParams->getHighlights();
     if (temp_highlights != m_highlights)
     {
         //cout << "ParameterManager::cloneParams highlights" << endl;
         m_highlights = temp_highlights;
-        validity = min(validity, Valid::load);
-    }
-
-    //Lensfun lens name
-    const QString temp_lensfunName = sourceParams->getLensfunName();
-    if (temp_lensfunName != s_lensfunName)
-    {
-        //cout << "ParameterManager::cloneParams lensfunName" << endl;
-        s_lensfunName = temp_lensfunName;
-        validity = min(validity, Valid::load);
-    }
-
-    //Lensfun CA correction
-    const int temp_lensfunCa = sourceParams->getLensfunCa();
-    if (temp_lensfunCa != s_lensfunCa)
-    {
-        //cout << "ParameterManager::cloneParams lensfunCa" << endl;
-        s_lensfunCa = temp_lensfunCa;
-        validity = min(validity, Valid::load);
-    }
-
-    //Lensfun vignetting correction
-    const int temp_lensfunVign = sourceParams->getLensfunVign();
-    if (temp_lensfunVign != s_lensfunVign)
-    {
-        //cout << "ParameterManager::cloneParams lensfunVign" << endl;
-        s_lensfunVign = temp_lensfunVign;
-        validity = min(validity, Valid::load);
-    }
-
-    //Lensfun distortion correction
-    const int temp_lensfunDist = sourceParams->getLensfunDist();
-    if (temp_lensfunDist != s_lensfunDist)
-    {
-        //cout << "ParameterManager::cloneParams lensfunDist" << endl;
-        s_lensfunDist = temp_lensfunDist;
-        validity = min(validity, Valid::load);
-    }
-
-    //Fine rotation angle
-    const float temp_rotationAngle = sourceParams->getRotationAngle();
-    if (temp_rotationAngle != m_rotationAngle)
-    {
-        //cout << "ParameterManager::cloneParams rotationAngle" << endl;
-        m_rotationAngle = temp_rotationAngle;
-        validity = min(validity, Valid::load);
-    }
-
-    //Rotation reference point coordinates
-    const float temp_rotationPointX = sourceParams->getRotationPointX();
-    if (temp_rotationPointX != m_rotationPointX)
-    {
-        //cout << "ParameterManager::cloneParams rotationPointX" << endl;
-        m_rotationPointX = temp_rotationPointX;
-        validity = min(validity, Valid::load);
-    }
-    const float temp_rotationPointY = sourceParams->getRotationPointY();
-    if (temp_rotationPointY != m_rotationPointY)
-    {
-        //cout << "ParameterManager::cloneParams rotationPointY" << endl;
-        m_rotationPointY = temp_rotationPointY;
-        validity = min(validity, Valid::load);
+        validity = min(validity, Valid::demosaic);
     }
 
     //Exposure compensation
@@ -3025,6 +3569,112 @@ void ParameterManager::cloneParams(ParameterManager * sourceParams)
         //cout << "ParameterManager::cloneParams tint" << endl;
         m_tint = temp_tint;
         validity = min(validity, Valid::demosaic);
+    }
+
+    //noise reduction enabled
+    const bool temp_nrEnabled = sourceParams->getNrEnabled();
+    if (temp_nrEnabled != m_nrEnabled)
+    {
+        m_nrEnabled = temp_nrEnabled;
+        validity = min(validity, Valid::postdemosaic);
+    }
+    //nlmeans number of clusters
+    const int temp_nlClusters = sourceParams->getNlClusters();
+    if (temp_nlClusters != m_nlClusters)
+    {
+        m_nlClusters = temp_nlClusters;
+        validity = min(validity, Valid::postdemosaic);
+    }
+
+    //nlmeans cluster threshold
+    const float temp_nlThresh = sourceParams->getNlThresh();
+    if (temp_nlThresh != m_nlThresh)
+    {
+        m_nlThresh = temp_nlThresh;
+        validity = min(validity, Valid::postdemosaic);
+    }
+
+    //nlmeans strength
+    const float temp_nlStrength = sourceParams->getNlStrength();
+    if (temp_nlStrength != m_nlStrength)
+    {
+        m_nlStrength = temp_nlStrength;
+        validity = min(validity, Valid::postdemosaic);
+    }
+
+    //impulse NR threshold
+    const float temp_impulseThresh = sourceParams->getImpulseThresh();
+    if (temp_impulseThresh != m_impulseThresh)
+    {
+        m_impulseThresh = temp_impulseThresh;
+        validity = min(validity, Valid::nrnlmeans);
+    }
+
+    //chroma NR strength
+    const float temp_chromaStrength = sourceParams->getChromaStrength();
+    if (temp_chromaStrength != m_chromaStrength)
+    {
+        m_chromaStrength = temp_chromaStrength;
+        validity = min(validity, Valid::nrimpulse);
+    }
+
+    //Lensfun lens name
+    const QString temp_lensfunName = sourceParams->getLensfunName();
+    if (temp_lensfunName != s_lensfunName)
+    {
+        //cout << "ParameterManager::cloneParams lensfunName" << endl;
+        s_lensfunName = temp_lensfunName;
+        validity = min(validity, Valid::nrchroma);
+    }
+
+    //Lensfun CA correction
+    const int temp_lensfunCa = sourceParams->getLensfunCa();
+    if (temp_lensfunCa != s_lensfunCa)
+    {
+        //cout << "ParameterManager::cloneParams lensfunCa" << endl;
+        s_lensfunCa = temp_lensfunCa;
+        validity = min(validity, Valid::nrchroma);
+    }
+
+    //Lensfun vignetting correction
+    const int temp_lensfunVign = sourceParams->getLensfunVign();
+    if (temp_lensfunVign != s_lensfunVign)
+    {
+        //cout << "ParameterManager::cloneParams lensfunVign" << endl;
+        s_lensfunVign = temp_lensfunVign;
+        validity = min(validity, Valid::nrchroma);
+    }
+
+    //Lensfun distortion correction
+    const int temp_lensfunDist = sourceParams->getLensfunDist();
+    if (temp_lensfunDist != s_lensfunDist)
+    {
+        //cout << "ParameterManager::cloneParams lensfunDist" << endl;
+        s_lensfunDist = temp_lensfunDist;
+        validity = min(validity, Valid::nrchroma);
+    }
+
+    //Fine rotation angle
+    const float temp_rotationAngle = sourceParams->getRotationAngle();
+    if (temp_rotationAngle != m_rotationAngle)
+    {
+        //cout << "ParameterManager::cloneParams rotationAngle" << endl;
+        m_rotationAngle = temp_rotationAngle;
+        validity = min(validity, Valid::nrchroma);
+    }
+
+    //Rotation reference point coordinates
+    const float temp_rotationPointX = sourceParams->getRotationPointX();
+    if (temp_rotationPointX != m_rotationPointX)
+    {
+        //cout << "ParameterManager::cloneParams rotationPointX" << endl;
+        m_rotationPointX = temp_rotationPointX;
+    }
+    const float temp_rotationPointY = sourceParams->getRotationPointY();
+    if (temp_rotationPointY != m_rotationPointY)
+    {
+        //cout << "ParameterManager::cloneParams rotationPointY" << endl;
+        m_rotationPointY = temp_rotationPointY;
     }
 
     //Initial developer concentration
@@ -3186,6 +3836,15 @@ void ParameterManager::cloneParams(ParameterManager * sourceParams)
     {
         //cout << "ParameterManager::cloneParams toeBoundary" << endl;
         m_toeBoundary = temp_toeBoundary;
+        validity = min(validity, Valid::prefilmulation);
+    }
+
+    //Highlight crosstalk. This controls the desaturation of highlights.
+    const float temp_highlightCrosstalk = sourceParams->getHighlightCrosstalk();
+    if (temp_highlightCrosstalk != m_highlightCrosstalk)
+    {
+        //cout << "ParameterManager::cloneParams highlightCrosstalk" << endl;
+        m_highlightCrosstalk = temp_highlightCrosstalk;
         validity = min(validity, Valid::prefilmulation);
     }
 
@@ -3424,6 +4083,7 @@ void ParameterManager::paste(QString toImageID)
 void ParameterManager::updateLensfunAvailability()
 {
     cout << "Updating availability" << endl;
+
     std::string camModel = model.toStdString();
     const lfCamera * camera = NULL;
     const lfCamera ** cameraList = ldb->FindCamerasExt(NULL, camModel.c_str());
@@ -3447,23 +4107,11 @@ void ParameterManager::updateLensfunAvailability()
             const lfLens ** lensList = ldb->FindLenses(camera, NULL, lensModel.c_str());
             if (lensList)
             {
-                //Check if sensor is monochrome
-                const bool isCR3 = fullFilenameQstr.endsWith(".cr3", Qt::CaseInsensitive);
-                bool isMonochrome = false;
-                if (!isCR3) //no CR3 cameras are monochrome
-                {
-                    cout << "updateAvailability exiv filename: " << m_fullFilename << endl;
-                    auto exifImage = Exiv2::ImageFactory::open(m_fullFilename);
-                    exifImage->readMetadata();
-                    Exiv2::ExifData exifData = exifImage->exifData();
-                    std::string wb = exifData["Exif.Photo.WhiteBalance"].toString();
-                    isMonochrome = wb.length()==0;
-                }
 
-                const lfLens *lensData = lensList[0];
-                lensfunCaAvail   = (lensData->CalibTCA != nullptr && lensData->CalibTCA[0] != nullptr && !isMonochrome);
-                lensfunVignAvail = (lensData->CalibVignetting != nullptr && lensData->CalibVignetting[0] != nullptr);
-                lensfunDistAvail = (lensData->CalibDistortion != nullptr && lensData->CalibDistortion[0] != nullptr);
+                const lfLens *lens = lensList[0];
+                lensfunCaAvail   = (lens->CalibTCA && lens->CalibTCA[0] && !isMonochrome);
+                lensfunVignAvail = (lens->CalibVignetting && lens->CalibVignetting[0]);
+                lensfunDistAvail = (lens->CalibDistortion && lens->CalibDistortion[0]);
                 emit lensfunCaAvailChanged();
                 emit lensfunVignAvailChanged();
                 emit lensfunDistAvailChanged();
@@ -3552,7 +4200,7 @@ void ParameterManager::updateCustomWbAvailability()
     QString makemodel = make;
     makemodel.append(model);
     customWbAvail = false;
-    for (uint64 i = 0; i < wbList.size(); i++)
+    for (uint64_t i = 0; i < wbList.size(); i++)
     {
         const QString currModel = std::get<0>(wbList.at(i));
         if (currModel == makemodel)
@@ -3568,7 +4216,7 @@ void ParameterManager::saveCustomWb()
     QString makemodel = make;
     makemodel.append(model);
     int index = -1;
-    for (uint64 i = 0; i < wbList.size(); i++)
+    for (uint64_t i = 0; i < wbList.size(); i++)
     {
         const QString currModel = std::get<0>(wbList.at(i));
         if (currModel == makemodel)
@@ -3594,7 +4242,7 @@ void ParameterManager::recallCustomWb()
 {
     QString makemodel = make;
     makemodel.append(model);
-    for (uint64 i = 0; i < wbList.size(); i++)
+    for (uint64_t i = 0; i < wbList.size(); i++)
     {
         const QString currModel = std::get<0>(wbList.at(i));
         if (currModel == makemodel)

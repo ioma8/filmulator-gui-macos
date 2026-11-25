@@ -17,6 +17,7 @@ ApplicationWindow {
     signal tooltipWanted(string text, int x, int y)
     signal imageURL(string newURL)
     property bool cropping: false
+    property bool helpMode: false
 
     onClosing: {
         close.accepted = false
@@ -261,6 +262,7 @@ ApplicationWindow {
 
                 Import {
                     id: importItem
+                    helpMode: root.helpMode
                     Component.onCompleted: {
                         importItem.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -270,6 +272,7 @@ ApplicationWindow {
                 Organize {
                     id: organizeItem
                     onOrganizeTab: tabs.currentIndex == 1
+                    helpMode: root.helpMode
                     Component.onCompleted: {
                         organizeItem.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -279,6 +282,7 @@ ApplicationWindow {
                 Edit {
                     id: editItem
                     onEditTab: tabs.currentIndex == 2
+                    helpMode: root.helpMode
                     Component.onCompleted: {
                         editItem.tooltipWanted.connect(root.tooltipWanted)
                         editItem.imageURL.connect(root.imageURL)
@@ -295,6 +299,7 @@ ApplicationWindow {
 
                 Settings {
                     id: settingsItem
+                    helpMode: root.helpMode
                     Component.onCompleted: {
                         settingsItem.tooltipWanted.connect(root.tooltipWanted)
                     }
@@ -308,6 +313,26 @@ ApplicationWindow {
                 width: parent.width
                 height: 1 * uiScale
                 color: Colors.whiteGrayH
+            }
+
+            ToolButton {
+                id: helpButton
+                x: parent.width - width - 2 * uiScale
+                y: 2 * uiScale
+                width: 100 * uiScale
+                height: 32 * uiScale
+                text: qsTr("Help")
+                tooltipText: root.helpMode ? qsTr("Make helpful tips show up only after a delay.") : qsTr("Show helpful tips immediately when you hover over tools.")
+                highlight: root.helpMode
+                noOutlineClick: true
+                onTriggered: {
+                    root.helpMode = !root.helpMode
+                }
+                tooltipInstant: true //we always want this button to show tooltips instantly
+                Component.onCompleted: {
+                    helpButton.tooltipWanted.connect(root.tooltipWanted)
+                }
+                uiScale: root.uiScale
             }
         }
 
@@ -336,6 +361,7 @@ ApplicationWindow {
                         }
                     }
                 }
+                helpMode: root.helpMode
                 Component.onCompleted: {
                     queueItem.tooltipWanted.connect(root.tooltipWanted)
                 }
@@ -347,6 +373,7 @@ ApplicationWindow {
     //Tooltip handling
     onTooltipWanted: {
         tooltipText.text = text
+        tooltipCatcher.primed = true
         tooltipCatcher.xInput = x
         tooltipCatcher.yInput = y
         tooltipCatcher.enabled = true
@@ -364,6 +391,7 @@ ApplicationWindow {
         property int xInput
         property int yInput
         property Item sourceItem
+        property bool primed: false
 
         onEnabledChanged: {
             if (enabled) {
@@ -374,14 +402,17 @@ ApplicationWindow {
         onPositionChanged: {
             tooltipCatcher.visible = false
             tooltipCatcher.enabled = false
+            tooltipCatcher.primed = false
         }
         onExited: {
             tooltipCatcher.visible = false
             tooltipCatcher.enabled = false
+            tooltipCatcher.primed = false
         }
         onWheel: {
             tooltipCatcher.visible = false
             tooltipCatcher.enabled = false
+            tooltipCatcher.primed = false
             wheel.accepted = false
         }
 
@@ -397,7 +428,7 @@ ApplicationWindow {
             property int posPad: 10 * uiScale
             width: Math.min(maxWidth, tooltipText.contentWidth + 2*padding)
             //For some reason, this switch needs to exist in height so that 1-line tooltips are displayed correctly the first time.
-            height: parent.visible ? (tooltipText.contentHeight + 2*padding) : 12
+            height: parent.primed ? (tooltipText.contentHeight + 2*padding) : 12
             z: 10
             Text {
                 id: tooltipText
